@@ -3,8 +3,24 @@ import { createServerSupabase } from "@/lib/supabase/server";
 import { BrandMark, ThemeToggle } from "@/components/shell";
 import { Card } from "@/components/primitives";
 
-function minutesBetween(a: string, b: string): number {
-  return Math.max(1, Math.round((new Date(b).getTime() - new Date(a).getTime()) / 60000));
+function formatTransitMode(mode: string): string {
+  const labels: Record<string, string> = {
+    walking: "Walking",
+    driving: "Driving",
+    transit: "Public transit",
+  };
+  return labels[mode] ?? mode;
+}
+
+function formatStartedAt(iso: string): string {
+  const date = new Date(iso);
+  const today = new Date();
+  const startOfToday = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  const startOfDay = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const days = Math.round((startOfToday.getTime() - startOfDay.getTime()) / 86400000);
+  if (days === 0) return "Today";
+  if (days === 1) return "Yesterday";
+  return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
 export const metadata = { title: "Home — Sentinel" };
@@ -88,6 +104,7 @@ export default async function HomePage() {
           </Link>
         </div>
 
+        {lastTrip ? (
         <Card className="mt-6">
           <div className="flex items-center justify-between">
             <div>
@@ -102,26 +119,46 @@ export default async function HomePage() {
             <div>
               <small className="text-muted">Last trip</small>
               <br />
-              <b>{lastTrip ? lastTrip.destination_text : "No trips yet"}</b>
+              <b>{lastTrip.destination_text}</b>
+              <br />
+              <small className="text-muted">
+                {formatTransitMode(lastTrip.transit_mode)}
+              </small>
             </div>
             <div className="text-right">
               <small className="text-muted">
-                {lastTrip
-                  ? new Date(lastTrip.started_at).toLocaleDateString(undefined, {
-                      month: "short",
-                      day: "numeric",
-                    })
-                  : "—"}
+                {formatStartedAt(lastTrip.started_at)}
               </small>
               <br />
-              <b>
-                {lastTrip
-                  ? `${minutesBetween(lastTrip.started_at, lastTrip.expected_arrival_at)} min`
-                  : "—"}
-              </b>
+              <b>{lastTrip.eta_minutes} min</b>
             </div>
           </div>
         </Card>
+      ) : (
+        <Card className="mt-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <span className="dot" />
+              <b>Sentinel standing by</b>
+            </div>
+            <span className="rounded-[20px] bg-primary2 px-2.5 py-1.5 text-[11px] font-bold text-primary">
+              Ready
+            </span>
+          </div>
+          <div className="mt-4">
+            <p className="leading-[1.5]">
+              No trips yet — start your first Walk With Me journey so Sentinel
+              can watch over you.
+            </p>
+            <Link
+              href="/journey/start"
+              className="mt-4 inline-block rounded-[10px] bg-primary px-4 py-2.5 text-[13px] font-bold text-white"
+            >
+              Start a journey →
+            </Link>
+          </div>
+        </Card>
+      )}
 
         <Card className="mt-3">
           <div className="eyebrow">Safety insight</div>
