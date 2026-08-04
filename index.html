@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
+<title>Sentinel — Protection that never sleeps</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Poppins:wght@600;700;800&display=swap" rel="stylesheet">
+<style>
+:root{
+ --bg:#FAF9F6;--card:#fff;--text:#2C2C2A;--muted:#73736d;--primary:#0F6E56;--primary2:#e7f3ef;
+ --accent:#C9622F;--line:#e8e7e1;--danger:#d94a32;--shadow:0 12px 32px rgba(36,54,48,.08);
+ --radius:18px;
+}
+[data-theme=dark]{
+ --bg:#0F1512;--card:#1A211D;--text:#F1EFE8;--muted:#a6ada7;--primary:#2BC99A;--primary2:#153a2f;
+ --accent:#E8944A;--line:#29332e;--danger:#ff7257;--shadow:0 0 0 1px rgba(43,201,154,.12),0 18px 40px rgba(0,0,0,.22);
+}
+*{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--text);font-family:Inter,sans-serif}
+button,input{font:inherit} button{border:0;cursor:pointer;color:inherit}
+.app{min-height:100vh;max-width:480px;margin:auto;position:relative;background:var(--bg);overflow:hidden}
+.screen{display:none;min-height:100vh;padding:24px 18px 92px}.screen.active{display:block}
+h1,h2,h3{font-family:Poppins,sans-serif;margin:0}.eyebrow{font-size:12px;text-transform:uppercase;letter-spacing:.12em;color:var(--primary);font-weight:700}
+.top{display:flex;align-items:center;justify-content:space-between;margin-bottom:24px}.iconbtn{width:42px;height:42px;border-radius:50%;background:var(--card);box-shadow:var(--shadow);display:grid;place-items:center}
+.brand{display:flex;align-items:center;gap:10px;font-family:Poppins;font-weight:800}.brandmark{width:38px;height:38px;border-radius:12px;background:var(--primary);color:white;display:grid;place-items:center;font-size:20px}
+.muted{color:var(--muted)}.card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);padding:18px}
+.hero{padding-top:34px}.hero h1{font-size:34px;line-height:1.08;letter-spacing:-.03em}.hero p{line-height:1.65;color:var(--muted);margin:14px 0 26px}
+.primary{width:100%;padding:16px 18px;border-radius:15px;background:var(--primary);color:white;font-weight:700;box-shadow:0 10px 24px rgba(15,110,86,.18)}
+.secondary{padding:13px 16px;border-radius:13px;background:var(--primary2);color:var(--primary);font-weight:700}
+.opt{width:100%;text-align:left;background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:16px;margin-bottom:10px}.opt b{font-size:15px}.opt small{display:block;margin-top:4px;color:var(--muted)}.opt.danger{background:var(--danger);border-color:var(--danger);color:#fff}.opt.danger small{color:#fffa}.danger{background:var(--danger);color:#fff}
+.quick{display:grid;grid-template-columns:repeat(4,1fr);gap:9px;margin:18px 0}.quick button{background:var(--card);border:1px solid var(--line);border-radius:15px;padding:12px 6px;box-shadow:var(--shadow);font-size:11px}.quick span{display:block;font-size:20px;margin-bottom:7px}
+.status{display:flex;align-items:center;justify-content:space-between}.dot{width:9px;height:9px;border-radius:50%;background:var(--primary);display:inline-block;margin-right:7px;box-shadow:0 0 0 5px color-mix(in srgb,var(--primary) 15%,transparent)}.pulse{animation:pulse 1.8s infinite}@keyframes pulse{50%{box-shadow:0 0 0 9px transparent}}
+.trip{margin-top:12px}.triprow{display:flex;justify-content:space-between;margin-top:15px}.tag{font-size:11px;padding:6px 9px;border-radius:20px;background:var(--primary2);color:var(--primary);font-weight:700}
+.field{margin:14px 0}.field label{font-size:12px;color:var(--muted);display:block;margin-bottom:7px}.input{width:100%;background:var(--card);border:1px solid var(--line);border-radius:13px;padding:14px;color:var(--text);outline:none}
+.mode{display:grid;grid-template-columns:repeat(5,1fr);gap:7px}.mode button{padding:11px 3px;border-radius:12px;background:var(--card);border:1px solid var(--line);font-size:11px}.mode button.sel{background:var(--primary2);color:var(--primary);border-color:var(--primary)}
+.chips{display:flex;gap:8px;overflow:auto}.chip{white-space:nowrap;padding:9px 12px;border:1px solid var(--line);background:var(--card);border-radius:20px;font-size:12px}.chip.sel{background:var(--primary2);color:var(--primary);border-color:var(--primary)}
+.map{height:310px;border-radius:20px;position:relative;overflow:hidden;background:
+linear-gradient(135deg,transparent 48%,rgba(15,110,86,.12) 49%,rgba(15,110,86,.12) 52%,transparent 53%),
+linear-gradient(25deg,transparent 42%,rgba(100,100,90,.13) 43%,rgba(100,100,90,.13) 45%,transparent 46%),
+#e9eee9}
+[data-theme=dark] .map{background:
+linear-gradient(135deg,transparent 48%,rgba(43,201,154,.18) 49%,rgba(43,201,154,.18) 52%,transparent 53%),
+linear-gradient(25deg,transparent 42%,rgba(180,190,180,.10) 43%,rgba(180,190,180,.10) 45%,transparent 46%),#18211d}
+.road{position:absolute;height:8px;background:var(--primary);border-radius:10px;transform:rotate(-23deg);width:120%;left:-10%;top:49%;box-shadow:0 0 16px rgba(43,201,154,.35);transition:background .3s,top .3s,transform .3s}.pin{position:absolute;width:16px;height:16px;border-radius:50%;background:var(--accent);border:4px solid var(--card);box-shadow:0 4px 14px #0002}.pin.a{left:22%;top:68%}.pin.b{right:18%;top:24%}.mapbadge{position:absolute;top:12px;left:12px;background:var(--card);padding:9px 11px;border-radius:12px;font-size:11px;box-shadow:var(--shadow)}.mapbadge.live{color:var(--primary)}.mapbadge.upd{color:var(--accent)}.mapbadge.stale{color:var(--muted)}
+.livebar{position:absolute;bottom:12px;left:12px;right:12px;background:var(--card);padding:13px;border-radius:14px;display:flex;justify-content:space-between;align-items:center}
+.nudge{position:fixed;inset:0;background:#0007;display:none;align-items:flex-end;z-index:20}.nudge.show{display:flex}.sheet{background:var(--card);width:100%;max-width:480px;margin:auto;border-radius:24px 24px 0 0;padding:24px 18px 30px}.illus{width:74px;height:74px;border-radius:24px;background:var(--primary2);display:grid;place-items:center;font-size:34px;margin-bottom:15px}
+.call{min-height:calc(100vh - 48px);display:flex;flex-direction:column;align-items:center;text-align:center;padding-top:45px}.avatar{width:105px;height:105px;border-radius:50%;background:linear-gradient(145deg,#cbb69a,#7f9b8b);display:grid;place-items:center;font-size:38px;color:#fff;margin:28px auto 18px}.callname{font-size:30px}.callsub{color:var(--muted);margin-top:8px}.callactions{margin-top:auto;width:100%;display:flex;justify-content:space-around;padding-bottom:22px}.callaction{width:66px;height:66px;border-radius:50%;background:#303934;color:white;display:grid;place-items:center;font-size:24px}.end{background:#df5946}.contact{display:flex;align-items:center;gap:12px;padding:13px 0;border-bottom:1px solid var(--line)}.contact:last-child{border:0}.miniavatar{width:42px;height:42px;border-radius:50%;background:var(--primary2);display:grid;place-items:center;color:var(--primary);font-weight:800}.grow{flex:1}.verified{font-size:10px;color:var(--primary);font-weight:700}.pending{font-size:10px;color:var(--accent);font-weight:700}
+.heatmap{position:absolute;inset:0;background:radial-gradient(circle at 30% 68%,#31a76b88 0 15%,transparent 29%),radial-gradient(circle at 65% 38%,#e7a03c88 0 15%,transparent 30%),radial-gradient(circle at 82% 72%,#db594b99 0 13%,transparent 25%)}.route-toggle{display:flex;background:var(--card);border:1px solid var(--line);padding:4px;border-radius:14px;margin-top:12px}.route-toggle button{flex:1;padding:11px;border-radius:10px;background:transparent}.route-toggle .on{background:var(--primary2);color:var(--primary);font-weight:700}
+.avatarrow{display:flex;align-items:center;margin:16px 0}.avatarrow .miniavatar{margin-right:-8px;border:2px solid var(--card)}.safe{color:var(--primary)}.transit{color:var(--accent)}
+.sos{min-height:calc(100vh - 48px);display:flex;flex-direction:column;justify-content:center;text-align:center}.sosring{width:150px;height:150px;border-radius:50%;margin:0 auto 25px;background:rgba(217,74,50,.12);display:grid;place-items:center;border:1px solid rgba(217,74,50,.35)}.sosring div{width:100px;height:100px;border-radius:50%;background:var(--danger);color:#fff;display:grid;place-items:center;font-family:Poppins;font-size:24px;box-shadow:0 0 40px rgba(217,74,50,.35)}
+.nav{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:min(480px,100%);background:color-mix(in srgb,var(--card) 94%,transparent);backdrop-filter:blur(18px);border-top:1px solid var(--line);display:grid;grid-template-columns:repeat(4,1fr);padding:9px 8px max(9px,env(safe-area-inset-bottom));z-index:10}.nav button{background:none;font-size:10px;color:var(--muted)}.nav button.active{color:var(--primary);font-weight:700}.nav i{font-style:normal;display:block;font-size:20px;margin-bottom:3px}
+.setting{display:flex;align-items:center;justify-content:space-between;padding:15px 0;border-bottom:1px solid var(--line)}.switch{width:48px;height:28px;border-radius:20px;background:var(--line);padding:3px}.switch span{display:block;width:22px;height:22px;border-radius:50%;background:var(--card);transition:.2s}.switch.on{background:var(--primary)}.switch.on span{transform:translateX(20px)}
+.toast{position:fixed;top:18px;left:50%;transform:translate(-50%,-20px);opacity:0;background:var(--text);color:var(--bg);padding:11px 15px;border-radius:12px;font-size:12px;z-index:40;transition:.25s}.toast.show{opacity:1;transform:translate(-50%,0)}
+@media(min-width:600px){body{padding:18px}.app{border-radius:28px;box-shadow:0 20px 70px #0002}}
+</style>
+</head>
+<body>
+<div class="app">
+  <section id="home" class="screen active">
+    <div class="top"><div class="brand"><div class="brandmark">◈</div>Sentinel</div><button class="iconbtn" onclick="toggleTheme()" aria-label="Toggle theme">☼</button></div>
+    <div class="hero"><div class="eyebrow">Protection that never sleeps</div><h1>Your quiet layer of safety.</h1><p>Sentinel watches over your journey in the background, so you can focus on getting where you're going.</p>
+    <button class="primary" onclick="show('journey')">Start Walk With Me →</button></div>
+    <div class="quick">
+      <button onclick="show('call')"><span>☎</span>Fake Call</button><button onclick="show('sos')"><span>◉</span>SOS</button><button onclick="show('circle')"><span>◌</span>Circle</button><button onclick="show('route')"><span>⌖</span>Safe Route</button>
+    </div>
+    <div class="card trip"><div class="status"><div><span class="dot"></span><b>Sentinel standing by</b></div><span class="tag">Ready</span></div><div class="triprow"><div><small class="muted">Last trip</small><br><b>Campus → Home</b></div><div style="text-align:right"><small class="muted">Today</small><br><b>18 min</b></div></div></div>
+    <div class="card" style="margin-top:12px"><div class="eyebrow">Safety insight</div><p style="line-height:1.5;margin:8px 0 0">Your usual route is currently clear. A brighter, busier route is available 3 min away.</p></div>
+  </section>
+
+  <section id="journey" class="screen">
+    <div class="top"><button class="iconbtn" onclick="show('home')">←</button><div><div class="eyebrow">New journey</div><b>Start Journey</b></div><button class="iconbtn" onclick="toggleTheme()" aria-label="Toggle theme">☾</button></div>
+    <div class="field"><label>DESTINATION</label><input class="input" id="destination" value="Home · 24 Green Park" placeholder="Where are you going?"/></div>
+    <div class="card"><div class="status"><b>Estimated arrival</b><span class="tag" id="etaBadge">18 min</span></div><p class="muted" style="font-size:12px">Buffer <b style="color:var(--text)" id="etaBufferLabel">+5 min</b> · editable</p><input id="etaBuffer" type="range" min="0" max="20" value="5" oninput="updateEta()" style="width:100%;accent-color:var(--primary)"></div>
+    <div class="field"><label>TRANSIT MODE</label><div class="mode">
+      <button class="sel" onclick="selectMode(this)">🚶<br>Walk</button><button onclick="selectMode(this)">🚗<br>Auto</button><button onclick="selectMode(this)">🚕<br>Cab</button><button onclick="selectMode(this)">🚌<br>Bus</button><button onclick="selectMode(this)">🚆<br>Train</button>
+    </div></div>
+    <div class="field"><label>TRUSTED CONTACTS</label><div class="chips"><button class="chip sel">Aisha ✓</button><button class="chip sel">Priya ✓</button><button class="chip">+ Add</button></div></div>
+    <button class="primary" style="margin-top:12px" onclick="startJourney()">Confirm & Start Journey</button>
+  </section>
+
+  <section id="live" class="screen">
+    <div class="top"><button class="iconbtn" onclick="show('home')">×</button><div class="status"><span class="dot pulse"></span><b>Live journey</b></div><button class="iconbtn" onclick="toggleTheme()" aria-label="Toggle theme">☼</button></div>
+    <div class="map"><div class="road"></div><div class="pin a"></div><div class="pin b"></div><div class="mapbadge live" id="gpsBadge">● GPS · Live now</div><div class="livebar"><div><b>All good</b><br><small class="muted">Home · 12 min remaining</small></div><span class="tag">Walking</span></div></div>
+    <div class="card" style="margin-top:12px"><div class="status"><div><span class="dot pulse"></span><b>Sentinel is watching</b></div><span class="muted">74%</span></div><p class="muted" style="font-size:12px;line-height:1.5">Location sharing is active with Aisha and Priya. No action needed.</p><small class="muted" id="nextCheckin" style="display:block;margin-top:6px"></small></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px"><button class="secondary" onclick="show('call')">☎ Fake Call</button><button class="secondary" onclick="show('choice')">Something feels off</button></div>
+  </section>
+
+  <section id="call" class="screen">
+    <div class="call"><div class="eyebrow">Incoming call</div><div class="avatar">AR</div><h1 class="callname">Aarav Mehta</h1><div class="callsub">mobile</div><div class="callactions"><div><button class="callaction">🔇</button><small>Mute</small></div><div><button class="callaction end" onclick="goBack()">☎</button><small>Decline</small></div><div><button class="callaction" onclick="acceptCall()">☎</button><small>Accept</small></div></div></div>
+  </section>
+
+  <section id="contacts" class="screen">
+    <div class="top"><div><div class="eyebrow">Your people</div><h2>Trusted Contacts</h2></div><button class="iconbtn" onclick="toggleTheme()" aria-label="Toggle theme">☼</button></div>
+    <div class="card" id="contactList"><div class="status"><div><b>Primary circle</b><br><small class="muted">Notified first</small></div><span class="tag" id="primaryCount">2 people</span></div>
+      <div class="contact" data-primary="1"><div class="miniavatar">AP</div><div class="grow"><b>Aisha Patel</b><br><span class="verified">✓ Verified · Primary</span></div><span>⋯</span></div>
+      <div class="contact" data-primary="1"><div class="miniavatar">PS</div><div class="grow"><b>Priya Sharma</b><br><span class="verified">✓ Verified · Primary</span></div><span>⋯</span></div>
+      <div class="contact" data-primary="0"><div class="miniavatar">RK</div><div class="grow"><b>Riya Kapoor</b><br><span class="pending">Pending · Secondary</span></div><span>⋯</span></div>
+    </div>
+    <button class="secondary" style="width:100%;margin-top:14px" onclick="show('circle')">◌ View Safety Circle</button>
+    <button class="primary" style="margin-top:10px" onclick="openAddContact()">+ Add Trusted Contact</button>
+  </section>
+
+  <section id="route" class="screen">
+    <div class="top"><button class="iconbtn" onclick="show('home')">←</button><div><div class="eyebrow">AI route intelligence</div><h2>Safe Route</h2></div><button class="iconbtn" onclick="toggleTheme()" aria-label="Toggle theme">☼</button></div>
+    <div class="map" id="routeMap"><div class="heatmap"></div><div class="road"></div><div class="pin a"></div><div class="pin b"></div><div class="mapbadge" id="routeBadge">Safest · 21 min · Risk low</div></div>
+    <div class="route-toggle"><button class="on" data-route="safest" onclick="routeTab(this)">Safest · 21 min</button><button data-route="fastest" onclick="routeTab(this)">Fastest · 17 min</button></div>
+    <div class="card" style="margin-top:12px"><div class="status"><b>Route confidence</b><span class="tag">92%</span></div><p class="muted" style="font-size:12px;line-height:1.5">AI favors brighter roads, open businesses and recent safe-travel signals.</p><div style="display:flex;gap:8px"><span class="tag">Green · Low</span><span class="tag" style="background:#fff1df;color:var(--accent)">Amber · Moderate</span><span class="tag" style="background:#ffe6e1;color:#b84434">Red · Avoid</span></div></div>
+  </section>
+
+  <section id="circle" class="screen">
+    <div class="top"><button class="iconbtn" onclick="goBack()">←</button><div><div class="eyebrow">Always connected</div><h2>Safety Circle</h2></div><button class="iconbtn" onclick="toggleTheme()" aria-label="Toggle theme">☼</button></div>
+    <div class="card"><div class="avatarrow"><div class="miniavatar">AP</div><div class="miniavatar">PS</div><div class="miniavatar">RK</div><div style="margin-left:15px"><b id="circleCount">3 people</b><br><small class="muted">your trusted circle</small></div></div>
+      <div class="contact"><div class="miniavatar">AP</div><div class="grow"><b>Aisha Patel</b><br><small class="safe">● Safe · Online</small></div><span>Now</span></div>
+      <div class="contact"><div class="miniavatar">PS</div><div class="grow"><b>Priya Sharma</b><br><small class="transit">● In transit</small></div><span>6m</span></div>
+      <div class="contact"><div class="miniavatar">RK</div><div class="grow"><b>Riya Kapoor</b><br><small class="muted">● Needs check</small></div><span>28m</span></div>
+    </div>
+    <div class="card" style="margin-top:12px"><b>Circle rule</b><p class="muted" style="line-height:1.5;font-size:12px">Primary contacts receive journey updates only when Sentinel detects a meaningful change.</p></div>
+  </section>
+
+  <section id="sos" class="screen">
+    <div class="sos"><div class="sosring"><div>SOS</div></div><div class="eyebrow" style="color:var(--danger)">Ready to send</div><h1 style="margin-top:8px">Are you sure you need help?</h1><p class="muted" style="line-height:1.6">Sentinel will share your live location and journey details with Aisha Patel and Priya Sharma.</p><div class="card" style="text-align:left;margin:12px 0"><b>What will be sent</b><p class="muted" style="font-size:12px;line-height:1.6">• Live location<br>• Last known route<br>• Emergency contact details</p></div><button class="primary danger" id="sosCancel" onclick="cancelSos()">Cancel · 08</button><button class="secondary" style="margin-top:10px" onclick="confirmSos()">Send SOS now</button></div>
+  </section>
+
+  <section id="choice" class="screen">
+    <div class="top"><button class="iconbtn" onclick="goBack()">←</button><div><div class="eyebrow">We've got you</div><h2>Something feels off</h2></div><button class="iconbtn" onclick="toggleTheme()" aria-label="Toggle theme">☼</button></div>
+    <p class="muted" style="line-height:1.6;margin-bottom:14px">Tell Sentinel how you'd like to respond — you can change your mind any time.</p>
+    <button class="opt" onclick="keepEye()"><b>👀 Keep an eye on me</b><small>Quiet notice to your circle. No SOS, no alarm.</small></button>
+    <button class="opt danger" onclick="needHelp()"><b>🆘 I need help now</b><small>Send your live location and details to your trusted circle.</small></button>
+    <button class="opt" onclick="fakeCallMe()"><b>☎ Fake call me</b><small>Trigger a believable incoming call so you can step away.</small></button>
+  </section>
+
+  <section id="settings" class="screen">
+    <div class="top"><div><div class="eyebrow">Control center</div><h2>Settings</h2></div><button class="iconbtn" onclick="toggleTheme()" aria-label="Toggle theme">☼</button></div>
+    <div class="card">
+      <div class="setting"><div><b>Night Watch mode</b><br><small class="muted">Use the dark night-watch palette</small></div><button class="switch" id="themeSwitch" onclick="toggleTheme()"><span></span></button></div>
+      <div class="setting"><div><b>Trusted contacts</b><br><small class="muted" id="settingsCount">3 contacts · 2 verified</small></div><span>›</span></div>
+      <div class="setting"><div><b>Trip history</b><br><small class="muted">14 journeys this month</small></div><span>›</span></div>
+      <div class="setting"><div><b>Location sharing</b><br><small class="muted">Only during active journeys</small></div><button class="switch" id="locSwitch" onclick="toggleLocation()"><span></span></button></div>
+    </div>
+    <div class="card" style="margin-top:12px"><div class="brand"><div class="brandmark">◈</div>Sentinel</div><p class="muted" style="line-height:1.5;font-size:12px">Protection that never sleeps. Designed to feel calm before it ever needs to be urgent.</p></div>
+  </section>
+
+  <nav class="nav">
+    <button onclick="show('home')" data-nav="home" class="active"><i>⌂</i>Home</button>
+    <button onclick="show('route')" data-nav="route"><i>⌖</i>Routes</button>
+    <button onclick="show('contacts')" data-nav="contacts"><i>◌</i>Contacts</button>
+    <button onclick="show('settings')" data-nav="settings"><i>⚙</i>Settings</button>
+  </nav>
+  <div class="nudge" id="nudge"><div class="sheet"><div class="illus">☕</div><div class="eyebrow">Sentinel check-in</div><h2 style="margin-top:6px">Still on your way?</h2><p class="muted" style="line-height:1.6">We noticed your journey is taking a little longer than expected. No pressure — just checking in.</p><div style="display:flex;gap:8px;margin:16px 0"><button class="chip" onclick="snooze('30 min')">30 min</button><button class="chip" onclick="snooze('1 hr')">1 hr</button><button class="chip" onclick="snooze('4 hr')">4 hr</button></div><button class="primary" onclick="arriveNow()">I've arrived</button><button class="secondary" style="width:100%;margin-top:9px" onclick="closeNudge();show('choice')">Something feels off</button></div></div>
+  <div class="nudge" id="addContact"><div class="sheet">
+    <div class="illus">👤</div><div class="eyebrow">Trusted circle</div><h2 style="margin-top:6px">Add a trusted contact</h2>
+    <div class="field"><label>FULL NAME</label><input class="input" id="acName" placeholder="e.g. Maya Iyer"/></div>
+    <div class="field"><label>PHONE NUMBER</label><input class="input" id="acPhone" placeholder="+91 98765 43210"/></div>
+    <div class="field"><label>RELATIONSHIP</label><div class="chips" id="acRel"><button class="chip sel" onclick="pickRel(this)">Family</button><button class="chip" onclick="pickRel(this)">Friend</button><button class="chip" onclick="pickRel(this)">Colleague</button><button class="chip" onclick="pickRel(this)">Other</button></div></div>
+    <div class="field"><label>PRIMARY OR SECONDARY</label><div class="mode" id="acPri" style="grid-template-columns:repeat(2,1fr)"><button class="sel" onclick="selectMode(this)">Primary</button><button onclick="selectMode(this)">Secondary</button></div></div>
+    <button class="primary" onclick="saveContact()">Add to Trusted Contacts</button>
+    <button class="secondary" style="width:100%;margin-top:9px" onclick="closeAddContact()">Cancel</button>
+  </div></div>
+  <div class="toast" id="toast"></div>
+</div>
+<script>
+let current='home',previousScreen='home';
+const escSnooze={'30 min':30,'1 hr':90,'4 hr':180};
+let escTimer=null,escLeft=18,escTick=null;
+let gpsTimer=null,gpsStart=0;
+let sosTimer=null,sosLeft=8;
+
+function show(id){
+  if(id===current)return;
+  previousScreen=current;
+  document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+  current=id;
+  document.querySelectorAll('.nav button').forEach(b=>b.classList.toggle('active',b.dataset.nav===id));
+  window.scrollTo(0,0);
+  if(id==='live'){startEscalation(18);startGpsTracking()}
+  else{stopEscalation();stopGpsTracking()}
+  if(id==='sos'){startSosCountdown()}else{stopSosCountdown()}
+  refreshCounts();
+}
+function goBack(){show(previousScreen&&previousScreen!==current?previousScreen:'home')}
+
+function toggleTheme(){let dark=document.documentElement.dataset.theme==='dark';document.documentElement.dataset.theme=dark?'':'dark';localStorage.setItem('sentinelTheme',dark?'light':'dark');document.getElementById('themeSwitch')?.classList.toggle('on',!dark);updateThemeIcons()}
+function updateThemeIcons(){const dark=document.documentElement.dataset.theme==='dark';document.querySelectorAll('[aria-label="Toggle theme"]').forEach(b=>b.textContent=dark?'☾':'☼')}
+if(localStorage.getItem('sentinelTheme')==='dark'){document.documentElement.dataset.theme='dark'}
+function initSwitches(){document.getElementById('themeSwitch')?.classList.toggle('on',document.documentElement.dataset.theme==='dark');document.getElementById('locSwitch')?.classList.toggle('on',localStorage.getItem('sentinelLoc')!=='off');updateThemeIcons();refreshCounts()}
+function toggleLocation(){let on=localStorage.getItem('sentinelLoc')!=='off';on=!on;localStorage.setItem('sentinelLoc',on?'on':'off');document.getElementById('locSwitch')?.classList.toggle('on',on);toast(on?'Location sharing on':'Location sharing paused')}
+
+function openNudge(){document.getElementById('nudge').classList.add('show')}function closeNudge(){document.getElementById('nudge').classList.remove('show')}
+function toast(msg){let t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),1800)}
+
+function selectMode(el){el.parentElement.querySelectorAll('button').forEach(x=>x.classList.remove('sel'));el.classList.add('sel')}
+function pickRel(el){el.parentElement.querySelectorAll('.chip').forEach(x=>x.classList.remove('sel'));el.classList.add('sel')}
+
+function updateEta(){const v=+document.getElementById('etaBuffer').value;document.getElementById('etaBadge').textContent=(13+v)+' min';document.getElementById('etaBufferLabel').textContent='+'+v+' min'}
+function startJourney(){const d=document.getElementById('destination');if(!d.value.trim()){toast('Add a destination before starting');d.focus();return}show('live')}
+
+function startEscalation(sec){stopEscalation();escLeft=sec;escTimer=setTimeout(()=>{stopEscalation();openNudge()},sec*1000);escTick=setInterval(()=>{escLeft--;renderCheckin();if(escLeft<=0){clearInterval(escTick);escTick=null}},1000);renderCheckin()}
+function stopEscalation(){if(escTimer){clearTimeout(escTimer);escTimer=null}if(escTick){clearInterval(escTick);escTick=null}renderCheckin()}
+function renderCheckin(){const el=document.getElementById('nextCheckin');if(!el)return;el.textContent=escTimer?'Next check-in ~'+Math.max(escLeft,0)+'s':''}
+function snooze(t){startEscalation(escSnooze[t]||60);closeNudge();toast('Snoozed for '+t+' — next check-in delayed')}
+function arriveNow(){stopEscalation();closeNudge();toast('Marked as arrived — journey ended');show('home')}
+
+function startGpsTracking(){stopGpsTracking();gpsStart=Date.now();renderGps();gpsTimer=setInterval(renderGps,5000)}
+function stopGpsTracking(){if(gpsTimer){clearInterval(gpsTimer);gpsTimer=null}}
+function renderGps(){const b=document.getElementById('gpsBadge');if(!b)return;const s=(Date.now()-gpsStart)/1000;let cls,txt;if(s<45){cls='live';txt='● GPS · Live now'}else if(s<120){cls='upd';txt='● GPS · Updated '+Math.floor(s/60)+' min ago'}else{cls='stale';txt='● GPS · Stale — last seen '+Math.floor(s/60)+' min ago'}b.className='mapbadge '+cls;b.textContent=txt}
+
+function startSosCountdown(){stopSosCountdown();sosLeft=8;renderSosCancel();sosTimer=setInterval(()=>{sosLeft--;if(sosLeft<=0){stopSosCountdown();confirmSos();return}renderSosCancel()},1000)}
+function stopSosCountdown(){if(sosTimer){clearInterval(sosTimer);sosTimer=null}}
+function renderSosCancel(){const b=document.getElementById('sosCancel');if(b)b.innerHTML='Cancel · '+String(sosLeft).padStart(2,'0')}
+function cancelSos(){stopSosCountdown();toast('SOS cancelled safely');goBack()}
+function confirmSos(){stopSosCountdown();toast('SOS simulation sent to trusted circle');goBack()}
+
+function routeTab(el){el.parentElement.querySelectorAll('button').forEach(x=>x.classList.remove('on'));el.classList.add('on');const fast=el.dataset.route==='fastest';const road=document.getElementById('routeMap')?.querySelector('.road');const badge=document.getElementById('routeBadge');if(road){if(fast){road.style.background='var(--accent)';road.style.top='38%';road.style.transform='rotate(-12deg)'}else{road.style.background='';road.style.top='';road.style.transform=''}}if(badge)badge.textContent=fast?'Fastest · 17 min · Risk moderate':'Safest · 21 min · Risk low'}
+
+function keepEye(){toast('Quiet alert sent to Aisha and Priya — no SOS');goBack()}
+function needHelp(){show('sos')}
+function fakeCallMe(){show('call')}
+function acceptCall(){toast('Call connected');goBack()}
+
+function openAddContact(){document.getElementById('addContact').classList.add('show');document.getElementById('acName').value='';document.getElementById('acPhone').value='';document.querySelectorAll('#acRel .chip').forEach(x=>x.classList.remove('sel'));document.querySelector('#acRel .chip').classList.add('sel');document.querySelectorAll('#acPri button').forEach(x=>x.classList.remove('sel'));document.querySelector('#acPri button').classList.add('sel')}
+function closeAddContact(){document.getElementById('addContact').classList.remove('show')}
+function escapeHtml(s){return s.replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+function saveContact(){const n=document.getElementById('acName').value.trim(),p=document.getElementById('acPhone').value.trim();if(!n){toast('Add a contact name');return}if(!p){toast('Add a valid phone number');return}const rel=(document.querySelector('#acRel .chip.sel')||document.querySelector('#acRel .chip')).textContent;const primary=document.querySelector('#acPri .sel').textContent==='Primary';const initials=n.split(/\s+/).map(w=>w[0]).slice(0,2).join('').toUpperCase()||'?';const row=document.createElement('div');row.className='contact';row.dataset.primary=primary?'1':'0';row.innerHTML='<div class="miniavatar">'+initials+'</div><div class="grow"><b>'+escapeHtml(n)+'</b><br><span class="'+(primary?'verified':'pending')+'">'+(primary?'✓ Verified':'Pending')+' · '+(primary?'Primary':'Secondary')+' · '+escapeHtml(rel)+'</span></div><span>⋯</span>';document.getElementById('contactList').appendChild(row);refreshCounts();closeAddContact();toast(n+' added to your trusted circle')}
+
+function refreshCounts(){const cs=document.querySelectorAll('#contactList .contact');const primary=[...cs].filter(c=>c.dataset.primary==='1').length,total=cs.length;const a=document.getElementById('primaryCount');if(a)a.textContent=primary+' people';const b=document.getElementById('settingsCount');if(b)b.textContent=total+' contacts · '+primary+' verified';const c=document.getElementById('circleCount');if(c)c.textContent=total+' people'}
+
+document.querySelectorAll('#journey .chips .chip').forEach(c=>c.addEventListener('click',()=>{if(c.textContent.trim()==='+ Add'){openAddContact();return}c.classList.toggle('sel')}));
+initSwitches();
+</script>
+</body>
+</html>
