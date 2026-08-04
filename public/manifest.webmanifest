@@ -1,0 +1,17 @@
+{
+  "name": "Sentinel",
+  "short_name": "Sentinel",
+  "description": "Protection that never sleeps",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#FAF9F6",
+  "theme_color": "#0F6E56",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}
