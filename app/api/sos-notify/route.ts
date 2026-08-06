@@ -5,7 +5,13 @@ import type { TrustedContact } from "@/lib/types";
 
 export const runtime = "nodejs";
 
-const RESEND_FROM = "sentinel@resend.dev";
+/**
+ * Resend's shared domain (onboarding@resend.dev) only delivers to your own
+ * account inbox — so until a custom domain is verified in Resend, the
+ * contact emails below will effectively only reach the logged-in user.
+ * Set RESEND_FROM_EMAIL (e.g. 'sentinel@yourdomain.com') once verified.
+ */
+const RESEND_SHARED_FROM = "onboarding@resend.dev";
 
 export async function POST(request: Request) {
   let body: { userId?: string; alertId?: string };
@@ -62,38 +68,13 @@ export async function POST(request: Request) {
   const contacts = (contactsRes.data ?? []) as TrustedContact[];
   const results: unknown[] = [];
 
-  // 1. Emergency emails to every verified primary contact with an email.
-  for (const contact of contacts) {
-    if (!contact.email) {
-      console.log(`[sos-notify] skipping contact "${contact.name}": no email address`);
-      results.push({ contact: contact.name, skipped: true, reason: "no email address" });
-      continue;
-    }
+  // Custom-domain sender falls back to Resend's shared account-only domain.
+  const fromAddress = process.env.RESEND_FROM_EMAIL?.trim() || RESEND_SHARED_FROM;
 
-    const { data, error } = await resend.emails.send({
-      from: RESEND_FROM,
-      to: [contact.email],
-      subject: `🚨 SENTINEL ALERT — ${fullName} needs help`,
-      html:
-        `<h2>Emergency Alert from Sentinel</h2>` +
-        `<p><strong>${fullName}</strong> has triggered an emergency SOS alert.</p>` +
-        `<p>Please contact them immediately and check on their safety.</p>` +
-        `<p>This alert was sent automatically by the Sentinel safety app.</p>`,
-    });
-
-    if (error) {
-      console.error(`[sos-notify] email to ${contact.name} failed:`, error);
-      results.push({ contact: contact.name, ok: false, detail: error.message });
-    } else {
-      console.log(`[sos-notify] emailed ${contact.name} <${contact.email}> (id=${data?.id})`);
-      results.push({ contact: contact.name, ok: true, id: data?.id });
-    }
-  }
-
-  // 2. Confirmation email to the user who triggered the SOS.
+  // 1. Confirmation email to the user who triggered the SOS.
   if (caller.email) {
     const { data, error } = await resend.emails.send({
-      from: RESEND_FROM,
+      from: fromAddress,
       to: [caller.email],
       subject: "Your SOS alert was sent",
       text: "Your emergency contacts have been notified. Help is on the way.",
@@ -105,6 +86,32 @@ export async function POST(request: Request) {
     } else {
       console.log(`[sos-notify] confirmation emailed ${caller.email} (id=${data?.id})`);
       results.push({ contact: "user", ok: true, id: data?.id });
+    }
+  }
+
+  // 2. Emergency alert to every verified primary contact with an email.
+  for (const contact of contacts) {
+    if (!contact.email) {
+      console.log(`[sos-notify] skipping contact "${contact.name}": no email address`);
+      results.push({ contact: contact.name, skipped: true, reason: "no email address" });
+      continue;
+    }
+
+    const { data, error } = await resend.emails.send({
+      from: fromAddress,
+      to: [contact.email],
+      subject: "🚨 SENTINEL EMERGENCY ALERT",
+      html:
+        `<h2>Emergency Alert</h2>` +
+        `<p><strong>${fullName}</strong> has triggered an SOS alert and may need immediate help. Please contact them now.</p>`,
+    });
+
+    if (error) {
+      console.error(`[sos-notify] email to ${contact.name} failed:`, error);
+      results.push({ contact: contact.name, ok: false, detail: error.message });
+    } else {
+      console.log(`[sos-notify] emailed ${contact.name} <${contact.email}> (id=${data?.id})`);
+      results.push({ contact: contact.name, ok: true, id: data?.id });
     }
   }
 
