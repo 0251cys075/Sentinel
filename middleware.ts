@@ -3,7 +3,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { supabaseUrl, supabaseAnonKey } from "@/lib/supabase/env";
 
 /** Paths that are public — never redirect signed-out users away from these. */
-const PUBLIC_PATHS = ["/login", "/landing", "/track", "/auth"];
+const PUBLIC_PATHS = ["/login", "/landing", "/track", "/auth", "/api"];
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;

@@ -30,9 +30,14 @@ export default function ContactsPage() {
 
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
+  const [email, setEmail] = useState("");
   const [relationship, setRelationship] = useState("Family");
   const [tier, setTier] = useState<"primary" | "secondary">("primary");
   const [saving, setSaving] = useState(false);
+
+  const [verifyTarget, setVerifyTarget] = useState<TrustedContact | null>(null);
+  const [code, setCode] = useState("");
+  const [verifying, setVerifying] = useState(false);
 
   const supabase = getSupabaseBrowser();
 
@@ -55,6 +60,7 @@ export default function ContactsPage() {
   const openSheet = () => {
     setName("");
     setPhone("");
+    setEmail("");
     setRelationship("Family");
     setTier("primary");
     setSheetOpen(true);
@@ -63,6 +69,7 @@ export default function ContactsPage() {
   const save = async () => {
     const n = name.trim();
     const p = phone.trim();
+    const e = email.trim();
     if (!n) return toast("Add a contact name");
     if (!p || p.replace(/\D/g, "").length < 8) return toast("Add a valid phone number");
 
@@ -72,22 +79,64 @@ export default function ContactsPage() {
         data: { user },
       } = await supabase.auth.getUser();
       if (!user) throw new Error("Not signed in");
-      const { error } = await supabase.from("trusted_contacts").insert({
-        user_id: user.id,
-        name: n,
-        phone: p,
-        relationship,
-        tier,
-        verified: false,
-      });
+      const { data: inserted, error } = await supabase
+        .from("trusted_contacts")
+        .insert({
+          user_id: user.id,
+          name: n,
+          phone: p,
+          email: e || null,
+          relationship,
+          tier,
+          verified: false,
+        })
+        .select("id")
+        .single();
       if (error) throw error;
+
       setSheetOpen(false);
-      toast(`${n} added to your trusted circle`);
+      toast(`${n} added — verification code sent`);
+
+      // Send the 6-digit verification code in the background.
+      void fetch("/api/contact-code", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ contactId: inserted.id }),
+      }).catch((err) => console.error("[contacts] verification send failed:", err));
+
       load();
     } catch (err) {
       toast(err instanceof Error ? err.message : "Could not add contact");
     } finally {
       setSaving(false);
+    }
+  };
+
+  const verify = async () => {
+    if (!verifyTarget) return;
+    const trimmed = code.trim();
+    if (trimmed.length !== 6) return toast("Enter the 6-digit verification code");
+
+    setVerifying(true);
+    try {
+      const res = await fetch("/api/verify-code", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ contactId: verifyTarget.id, code: trimmed }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        console.error("[contacts] verify-code failed:", data);
+        throw new Error(data.error ?? "Could not verify contact");
+      }
+      setVerifyTarget(null);
+      setCode("");
+      toast(`${verifyTarget.name} verified`);
+      load();
+    } catch (err) {
+      toast(err instanceof Error ? err.message : "Could not verify contact");
+    } finally {
+      setVerifying(false);
     }
   };
 
@@ -99,10 +148,23 @@ export default function ContactsPage() {
         <br />
         <span className={c.verified ? "text-[10px] font-bold text-primary" : "text-[10px] font-bold text-accent"}>
           {c.verified ? "✓ Verified" : "Pending"} · {c.tier === "primary" ? "Primary" : "Secondary"}
-          {relationship !== "Other" && ` · ${relationship}`}
+          {c.relationship !== "Other" && ` · ${c.relationship}`}
         </span>
       </div>
-      <span className="text-muted">⋯</span>
+      {c.verified ? (
+        <span className="text-muted">⋯</span>
+      ) : (
+        <button
+          type="button"
+          onClick={() => {
+            setCode("");
+            setVerifyTarget(c);
+          }}
+          className="rounded-[20px] bg-primary2 px-3 py-1.5 text-[11px] font-bold text-primary"
+        >
+          Verify
+        </button>
+      )}
     </div>
   );
 
@@ -160,6 +222,9 @@ export default function ContactsPage() {
         <Field label="PHONE NUMBER">
           <TextInput value={phone} onChange={setPhone} placeholder="+91 98765 43210" type="tel" />
         </Field>
+        <Field label="EMAIL (OPTIONAL — FALLBACK ALERTS)">
+          <TextInput value={email} onChange={setEmail} placeholder="maya@example.com" type="email" />
+        </Field>
         <Field label="RELATIONSHIP">
           <div className="flex gap-2 overflow-x-auto pb-1">
             {RELATIONSHIPS.map((r) => (
@@ -190,6 +255,25 @@ export default function ContactsPage() {
           {saving ? "Adding…" : "Add to Trusted Contacts"}
         </PrimaryButton>
         <SecondaryButton className="mt-2.5 w-full" onClick={() => setSheetOpen(false)}>
+          Cancel
+        </SecondaryButton>
+      </Sheet>
+
+      <Sheet open={verifyTarget !== null} onClose={() => setVerifyTarget(null)}>
+        <div className="illus">✓</div>
+        <div className="eyebrow">Trusted circle</div>
+        <h2 className="font-display mt-1.5 text-xl">Verify {verifyTarget?.name}</h2>
+        <p className="mb-4 mt-2 text-sm leading-[1.6] text-muted">
+          Enter the 6-digit code we sent to {verifyTarget?.phone || verifyTarget?.email}.
+          Verified contacts receive real SOS alerts.
+        </p>
+        <Field label="VERIFICATION CODE">
+          <TextInput value={code} onChange={setCode} placeholder="123456" type="tel" />
+        </Field>
+        <PrimaryButton onClick={verify} disabled={verifying}>
+          {verifying ? "Verifying…" : "Verify Contact"}
+        </PrimaryButton>
+        <SecondaryButton className="mt-2.5 w-full" onClick={() => setVerifyTarget(null)}>
           Cancel
         </SecondaryButton>
       </Sheet>

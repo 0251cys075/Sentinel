@@ -7,9 +7,9 @@ export interface Database {
         Update: { id?: string; full_name?: string | null; phone?: string | null; created_at?: string };
       };
       trusted_contacts: {
-        Row: { id: string; user_id: string; name: string; phone: string; relationship: string; tier: 'primary' | 'secondary'; verified: boolean; created_at: string };
-        Insert: { id?: string; user_id: string; name: string; phone: string; relationship?: string; tier?: 'primary' | 'secondary'; verified?: boolean; created_at?: string };
-        Update: { id?: string; user_id?: string; name?: string; phone?: string; relationship?: string; tier?: 'primary' | 'secondary'; verified?: boolean; created_at?: string };
+        Row: { id: string; user_id: string; name: string; phone: string; email: string | null; relationship: string; tier: 'primary' | 'secondary'; verified: boolean; pending_verification_code: string | null; created_at: string };
+        Insert: { id?: string; user_id: string; name: string; phone: string; email?: string | null; relationship?: string; tier?: 'primary' | 'secondary'; verified?: boolean; pending_verification_code?: string | null; created_at?: string };
+        Update: { id?: string; user_id?: string; name?: string; phone?: string; email?: string | null; relationship?: string; tier?: 'primary' | 'secondary'; verified?: boolean; pending_verification_code?: string | null; created_at?: string };
       };
       trips: {
         Row: { id: string; user_id: string; destination_text: string; destination_lat: number | null; destination_lng: number | null; transit_mode: string; eta_minutes: number; buffer_minutes: number; status: 'active' | 'arrived' | 'escalated' | 'cancelled'; started_at: string; expected_arrival_at: string };

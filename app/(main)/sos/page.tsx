@@ -84,19 +84,32 @@ function SosScreen() {
       if (!user) throw new Error("Not signed in");
 
       const tripId = await resolveTripId(user.id);
-      const { error } = await supabase.from("alerts").insert({
-        trip_id: tripId,
-        user_id: user.id,
-        type: "sos",
-        status: "sent",
-        created_at: new Date().toISOString(),
-      });
+      const { data: alert, error } = await supabase
+        .from("alerts")
+        .insert({
+          trip_id: tripId,
+          user_id: user.id,
+          type: "sos",
+          status: "sent",
+          created_at: new Date().toISOString(),
+        })
+        .select("id")
+        .single();
       if (error) {
         console.error("SOS alert insert failed:", error);
         throw error;
       }
 
       notifySosSmsDemo();
+
+      // Fire real notifications in the background — never block the success
+      // screen on WhatsApp/email delivery.
+      void fetch("/api/sos-notify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId: user.id, alertId: alert.id }),
+      }).catch((err) => console.error("[sos-notify] background fetch failed:", err));
+
       return true;
     } catch (err) {
       doneRef.current = false;

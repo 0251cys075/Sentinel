@@ -21,9 +21,11 @@ export interface TrustedContact {
   user_id: string;
   name: string;
   phone: string;
+  email: string | null;
   relationship: string;
   tier: ContactTier;
   verified: boolean;
+  pending_verification_code: string | null;
   account_id: string | null;
   created_at: string;
 }
@@ -80,9 +82,11 @@ export interface TrustedContactInsert {
   user_id: string;
   name: string;
   phone: string;
+  email?: string | null;
   relationship: string;
   tier: ContactTier;
   verified?: boolean;
+  pending_verification_code?: string | null;
   account_id?: string | null;
 }
 
