@@ -13,14 +13,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useToast } from "@/components/toast";
 
-declare global {
-  // Active camera stream parked on window so the self-attaching <video>
-  // callback ref can grab it without racing the getUserMedia promise.
-  interface Window {
-    localStream?: MediaStream | null;
-  }
-}
-
 const OFFICER_NAME = "Inspector V. Sharma";
 const OFFICER_ROLE = "UP Police 112 Dispatch Control Room";
 
@@ -46,15 +38,13 @@ interface GpsStamp {
   place: string | null;
 }
 
-/** Multi-stage control-room audio, timed from the moment the call is accepted. */
+/**
+ * Multi-stage control-room audio, timed from the moment the call is accepted.
+ * The opening line is spoken by speakPoliceOfficerVoice() at 2s; these follow-ups
+ * run through speakLine().
+ */
 type ScriptStage = { atMs: number; lines: string[] };
 const SCRIPT: ScriptStage[] = [
-  {
-    atMs: 2_000,
-    lines: [
-      "UP Police Control Room 112. Ma'am, aapki live location system par lock ho gayi hai. PCR Van 104 Knowledge Park se 1 minute ke distance par hai. Suspect ki taraf camera point karein.",
-    ],
-  },
   {
     atMs: 12_000,
     lines: [
@@ -91,6 +81,52 @@ function speakLine(text: string, lang = "hi-IN") {
   window.speechSynthesis.speak(utter);
 }
 
+/**
+ * Deep authoritative Indian MALE police voice — the call opener. Explicitly
+ * avoids the browser's default TTS: targets Indian male voice profiles
+ * (Google Hindi, Microsoft Hemant / Ravi, or hi-IN / en-IN) with a firm,
+ * low-pitched delivery.
+ */
+function speakPoliceOfficerVoice() {
+  if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
+  window.speechSynthesis.cancel();
+
+  const utterance = new SpeechSynthesisUtterance(
+    "Suno! UP Police Control Room 112. Ma'am, aapki live GPS location lock ho gayi hai. Knowledge Park III ke pass PCR Van 104 bas 30 seconds door hai. Phone ka camera suspect ki taraf ghoomayein!"
+  );
+  utterance.lang = "hi-IN";
+
+  const loadVoicesAndSpeak = () => {
+    const voices = window.speechSynthesis.getVoices();
+    // Search for Indian Male voice profiles (Google Hindi, Microsoft Hemant, or hi-IN)
+    const maleIndianVoice =
+      voices.find(
+        (v) =>
+          (v.lang.includes("hi") || v.lang.includes("en-IN")) &&
+          (v.name.includes("Male") ||
+            v.name.includes("Hemant") ||
+            v.name.includes("Google") ||
+            v.name.includes("Ravi"))
+      ) || voices.find((v) => v.lang.includes("hi-IN"));
+
+    if (maleIndianVoice) utterance.voice = maleIndianVoice;
+
+    utterance.rate = 0.88; // Firm, deliberate police tone
+    utterance.pitch = 0.82; // Lower, deeper male pitch
+
+    window.speechSynthesis.speak(utterance);
+  };
+
+  if (window.speechSynthesis.getVoices().length > 0) {
+    loadVoicesAndSpeak();
+  } else {
+    window.speechSynthesis.onvoiceschanged = () => {
+      loadVoicesAndSpeak();
+      window.speechSynthesis.onvoiceschanged = null; // speak once
+    };
+  }
+}
+
 function fmtLat(lat: number): string {
   return `${Math.abs(lat).toFixed(4)}° ${lat >= 0 ? "N" : "S"}`;
 }
@@ -112,7 +148,7 @@ function InspectorAvatar({ alt }: { alt: string }) {
       src={src}
       alt={alt}
       onError={onError}
-      className="mx-auto h-28 w-28 rounded-full border-2 border-amber-500/60 bg-slate-900 object-contain p-2 shadow-lg shadow-amber-500/20"
+      className="mx-auto h-28 w-28 rounded-full border-2 border-amber-500/70 bg-slate-900 object-contain p-4 shadow-lg shadow-amber-500/20"
     />
   );
 }
@@ -124,6 +160,7 @@ export default function FakeCallPage() {
   const [connected, setConnected] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const [camState, setCamState] = useState<"idle" | "live" | "denied">("idle");
+  const [stream, setStream] = useState<MediaStream | null>(null);
   const [gps, setGps] = useState<GpsStamp>(FALLBACK_GPS);
 
   const streamRef = useRef<MediaStream | null>(null);
@@ -155,33 +192,43 @@ export default function FakeCallPage() {
     timersRef.current.push(window.setTimeout(fn, ms));
   }, []);
 
-  /* ── Start front camera (evidence stream) ── */
-  const startCamera = useCallback(async () => {
-    try {
-      if (!navigator.mediaDevices?.getUserMedia) {
-        setCamState("denied");
-        return;
+  /* ── Request front camera IMMEDIATELY on page load ──
+     The stream lands in React state; the <video> callback ref binds it the
+     moment the active-call PiP mounts, so the feed is never a black box. */
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        if (!navigator.mediaDevices?.getUserMedia) {
+          setCamState("denied");
+          return;
+        }
+        const s = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: "user" }, // front camera
+          audio: false,
+        });
+        if (cancelled) {
+          s.getTracks().forEach((t) => t.stop());
+          return;
+        }
+        streamRef.current = s;
+        setStream(s);
+        setCamState("live");
+      } catch {
+        if (!cancelled) setCamState("denied");
       }
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "user" }, // front camera
-        audio: false,
-      });
-      streamRef.current = stream;
-      // Park on window so the self-attaching video callback ref can bind to it.
-      window.localStream = stream;
-      setCamState("live");
-    } catch {
-      setCamState("denied");
-    }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const stopEverything = useCallback(() => {
     // 1. Stop every camera track (kills the red camera LED too).
     streamRef.current?.getTracks().forEach((track) => track.stop());
     streamRef.current = null;
-    // 2. Clear the global stream handle — the <video> callback ref sees null
-    //    and no longer binds the dead stream.
-    window.localStream = null;
+    // 2. Drop the stream from state — the video callback ref rebinds to null.
+    setStream(null);
     // 3. Halt any queued/ongoing speech.
     if (typeof window !== "undefined" && "speechSynthesis" in window) {
       window.speechSynthesis.cancel();
@@ -191,19 +238,19 @@ export default function FakeCallPage() {
     timersRef.current = [];
   }, []);
 
-  /* ── Accept: connect camera + start the staged 112 audio script ── */
-  const startCall = useCallback(async () => {
+  /* ── Accept: connect the staged 112 audio script (camera already live) ── */
+  const startCall = useCallback(() => {
     if (callStartedRef.current) return;
     callStartedRef.current = true;
     setConnected(true);
-    await startCamera();
 
+    schedule(() => speakPoliceOfficerVoice(), 2_000);
     SCRIPT.forEach((stage) => {
       schedule(() => {
         stage.lines.forEach((line, i) => schedule(() => speakLine(line), i * 600));
       }, stage.atMs);
     });
-  }, [schedule, startCamera]);
+  }, [schedule]);
 
   /* ── Decline / End: hard cleanup → dashboard with success toast ── */
   const endCall = useCallback(() => {
@@ -293,8 +340,8 @@ export default function FakeCallPage() {
           {camState === "live" ? (
             <video
               ref={(node) => {
-                if (node && window.localStream) {
-                  node.srcObject = window.localStream;
+                if (node && stream) {
+                  node.srcObject = stream;
                   node.play().catch(() => {});
                 }
               }}
@@ -327,6 +374,12 @@ export default function FakeCallPage() {
         <h1 className="police-name">{OFFICER_NAME}</h1>
         <p className="police-role">{OFFICER_ROLE}</p>
         <span className="secure-tag">🔒 Secure — suspect footage being recorded</span>
+      </div>
+
+      <div className="w-full px-4 pb-4">
+        <div className="rounded-lg border border-red-500/40 bg-red-700/80 px-3 py-2 text-center font-mono text-[10.5px] font-bold tracking-wide text-white">
+          🔴 POLICE DISPATCH ACTIVE • SUSPECT EVIDENCE STREAMED TO CONTROL ROOM
+        </div>
       </div>
 
       <div className="pb-[28px]">
