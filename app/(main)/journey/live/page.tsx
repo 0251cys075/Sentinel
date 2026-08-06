@@ -1,11 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, Suspense } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, Suspense } from "react";
 import dynamic from "next/dynamic";
 import { useRouter, useSearchParams } from "next/navigation";
 import { getSupabaseBrowser } from "@/lib/supabase/client";
 import { useToast } from "@/components/toast";
 import { useFcmRegistration } from "@/lib/fcm";
+import { buildSosSmsDeepLink, isMobileDevice } from "@/lib/sos";
 import {
   Card,
   OptRow,
@@ -55,6 +56,8 @@ function LiveScreen() {
   const [choiceOpen, setChoiceOpen] = useState(false);
   const [checkInOpen, setCheckInOpen] = useState(false);
   const [demoOpen, setDemoOpen] = useState(false);
+  const [arriving, setArriving] = useState(false);
+  const arrivedRef = useRef(false);
 
   // ── Feature 1: live telemetry stream (GPS + speed + demo simulator) ──
   const tel = useLiveTelemetry({
@@ -114,8 +117,9 @@ function LiveScreen() {
           const row = payload.new as Trip;
           setTrip(row);
           if (row.status === "arrived") {
+            if (arrivedRef.current) return; // own completion — arrived() handles nav
             toast("Marked as arrived — journey ended");
-            router.push("/");
+            router.push("/?journey=completed");
           }
           if (row.status === "cancelled") {
             toast("Journey cancelled");
@@ -167,9 +171,15 @@ function LiveScreen() {
     [tel.effectiveSpeedKmh, remKm]
   );
   const activeAlert = alerts.find((a) => a.status !== "resolved");
-  const baseEtaMin = trip
-    ? Math.max(0, Math.round((new Date(trip.expected_arrival_at).getTime() - Date.now()) / 60000))
-    : null;
+  const baseEtaMin = useMemo(() => {
+    if (!trip) return null;
+    const arrival = new Date(trip.expected_arrival_at).getTime();
+    // Guard: null/invalid timestamps must never produce a huge fallback ETA.
+    if (!trip.expected_arrival_at || Number.isNaN(arrival)) return null;
+    const mins = Math.round((arrival - Date.now()) / 60000);
+    if (!Number.isFinite(mins)) return null;
+    return Math.max(0, Math.min(mins, 1440)); // never exceed 24h, never negative
+  }, [trip]);
   const remainingMin = liveEtaMin ?? baseEtaMin;
 
   const destination =
@@ -208,10 +218,105 @@ function LiveScreen() {
     [trip, supabase, tripId, activeAlert, toast]
   );
 
+  /* ── Bug 2: "I've arrived" — complete trip, revoke guest links, notify
+     trusted contacts (push alert + native SMS), redirect with banner. ── */
+
+  /** Compose + dispatch the native arrival SMS to the first primary contact. */
+  const dispatchArrivalSms = useCallback(async () => {
+    const destination = trip?.destination_text ?? "my destination";
+    const arrivalMsg = encodeURIComponent(`SAFE ARRIVAL: I have arrived safely at ${destination}.`);
+
+    const { data: primary } = await supabase
+      .from("trusted_contacts")
+      .select("name, phone")
+      .eq("tier", "primary")
+      .eq("verified", true)
+      .limit(1);
+    const contactPhone = primary?.[0]?.phone ?? "";
+    if (!contactPhone) {
+      toast("No primary contact with a phone — arrival shared via app alerts");
+      return;
+    }
+
+    const smsUri = buildSosSmsDeepLink(contactPhone, arrivalMsg);
+    if (!smsUri) {
+      toast("Could not build arrival SMS link");
+      return;
+    }
+
+    // Native SMS composer on phones; clipboard fallback on desktop.
+    if (isMobileDevice(navigator.userAgent)) {
+      window.location.href = smsUri;
+    } else {
+      try {
+        await navigator.clipboard.writeText(
+          `SAFE ARRIVAL: I have arrived safely at ${destination}.`
+        );
+        toast("Arrival SMS copied — paste in your messaging app");
+      } catch {
+        toast("Arrival notice ready — open your messaging app to send");
+      }
+    }
+  }, [supabase, trip, toast]);
+
   const arrived = useCallback(async () => {
+    if (arrivedRef.current || arriving) return;
+    arrivedRef.current = true;
     setCheckInOpen(false);
-    await supabase.from("trips").update({ status: "arrived" }).eq("id", tripId);
-  }, [supabase, tripId]);
+    setArriving(true);
+    try {
+      // a) Mark the trip completed — realtime updates the UI + guest pages.
+      const { error: tripError } = await supabase
+        .from("trips")
+        .update({ status: "arrived" })
+        .eq("id", tripId);
+      if (tripError) throw new Error(`Trip update failed: ${tripError.message}`);
+
+      // b) Resolve open alerts + invalidate guest tokens so shared links
+      //    stop working (get_public_* helpers require an un-resolved alert).
+      const nowIso = new Date().toISOString();
+      const { error: alertError } = await supabase
+        .from("alerts")
+        .update({
+          status: "resolved",
+          resolved_at: nowIso,
+          guest_token: null,
+          guest_token_expires_at: nowIso,
+        })
+        .eq("trip_id", tripId)
+        .in("status", ["pending", "sent"]);
+      if (alertError) console.error("resolving alerts on arrival failed:", alertError.message);
+
+      // c) Arrival alert → the DB trigger pushes it to the trusted circle.
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (user) {
+        const { error: arrivedError } = await supabase.from("alerts").insert({
+          trip_id: tripId,
+          user_id: user.id,
+          type: "arrived",
+          status: "pending",
+        });
+        if (arrivedError) console.error("arrival alert insert failed:", arrivedError.message);
+      }
+    } catch (err) {
+      arrivedRef.current = false;
+      setArriving(false);
+      toast(err instanceof Error ? err.message : "Could not complete journey — please retry");
+      return;
+    }
+
+    // d) Native SMS to primary contact, then redirect home with a banner.
+    try {
+      await dispatchArrivalSms();
+    } catch (err) {
+      console.error("arrival SMS dispatch failed:", err);
+      toast("Journey completed — arrival SMS could not be opened");
+    }
+    toast("Journey completed safely");
+    router.push("/?journey=completed");
+  }, [supabase, tripId, router, toast, dispatchArrivalSms, arriving]);
 
   const cancelJourney = useCallback(async () => {
     await supabase.from("trips").update({ status: "cancelled" }).eq("id", tripId);
@@ -246,9 +351,10 @@ function LiveScreen() {
           type="button"
           aria-label="Arrive"
           onClick={arrived}
-          className="rounded-[20px] bg-primary2 px-3 py-2 text-xs font-bold text-primary"
+          disabled={arriving}
+          className="rounded-[20px] bg-primary2 px-3 py-2 text-xs font-bold text-primary disabled:opacity-60"
         >
-          I&apos;ve arrived
+          {arriving ? "Completing…" : "I&apos;ve arrived"}
         </button>
       </div>
 
@@ -348,7 +454,9 @@ function LiveScreen() {
           <button type="button" className="rounded-[20px] border border-line bg-card px-3 py-2 text-xs" onClick={() => snooze(60)}>1 hr</button>
           <button type="button" className="rounded-[20px] border border-line bg-card px-3 py-2 text-xs" onClick={() => snooze(180)}>4 hr</button>
         </div>
-        <PrimaryButton onClick={arrived}>I&apos;ve arrived</PrimaryButton>
+        <PrimaryButton onClick={arrived} disabled={arriving}>
+          {arriving ? "Completing…" : "I&apos;ve arrived"}
+        </PrimaryButton>
         <SecondaryButton className="mt-2.5 w-full" onClick={() => { setCheckInOpen(false); setChoiceOpen(true); }}>
           Something feels off
         </SecondaryButton>

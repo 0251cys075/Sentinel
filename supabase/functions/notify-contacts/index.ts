@@ -46,6 +46,10 @@ Deno.serve(async (req: Request) => {
         title: "🚨 SOS",
         body: "Someone you protect has triggered SOS. Open the live track now.",
       },
+      arrived: {
+        title: "✅ Safe arrival",
+        body: "They have arrived safely. You can breathe easy — the journey is done.",
+      },
     };
     const { title, body } = copy[alert.type] ?? copy.nudge;
     const trackUrl = `${publicBaseUrl()}/track/${alert.trip_id ?? ""}`;
@@ -66,7 +70,7 @@ Deno.serve(async (req: Request) => {
 
     let recipients: { token: string; phone?: string | null }[] = [];
 
-    if (alert.type === "contact_notify" || alert.type === "sos") {
+    if (alert.type === "contact_notify" || alert.type === "sos" || alert.type === "arrived") {
       // Push to trusted contacts who have the app installed (account linked).
       const { data: contacts } = await supabase
         .from("trusted_contacts")

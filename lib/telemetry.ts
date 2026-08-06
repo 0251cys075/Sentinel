@@ -41,10 +41,28 @@ export function remainingKm(
   return haversine(current, { lat: destLat, lng: destLng }) / 1000;
 }
 
-/** Dynamic ETA in minutes from current speed + remaining distance. */
+/**
+ * Dynamic ETA in minutes from current speed + remaining distance.
+ *
+ * Guard clauses (see Bug 1):
+ *  - speed ≤ 0.5 (or null) falls back to a standard 4.5 km/h walking pace so
+ *    a stationary/glitchy GPS fix never yields an absurd figure.
+ *  - NaN / negative / non-finite / > 24h results are clamped to a sensible
+ *    15-minute default so the UI can never show "217182 min remaining".
+ */
 export function dynamicEtaMin(speedKmh: number | null, remKm: number | null): number | null {
-  if (speedKmh == null || remKm == null || remKm <= 0 || speedKmh <= 0.1) return null;
-  return Math.round((remKm / speedKmh) * 60);
+  if (remKm == null || !Number.isFinite(remKm) || remKm <= 0) return null;
+  const currentSpeed = speedKmh != null && speedKmh > 0.5 ? speedKmh : 4.5;
+  let remainingMinutes = Math.round((remKm / currentSpeed) * 60);
+  if (
+    Number.isNaN(remainingMinutes) ||
+    !Number.isFinite(remainingMinutes) ||
+    remainingMinutes < 0 ||
+    remainingMinutes > 1440
+  ) {
+    remainingMinutes = 15; // Fallback sensible default ETA
+  }
+  return remainingMinutes;
 }
 
 /** Bearing in degrees (0-360, from true north) between two points. */

@@ -25,7 +25,11 @@ function formatStartedAt(iso: string): string {
 
 export const metadata = { title: "Home — Sentinel" };
 
-export default async function HomePage() {
+export default async function HomePage({
+  searchParams,
+}: {
+  searchParams?: { journey?: string };
+}) {
   const supabase = await createServerSupabase();
   const {
     data: { user },
@@ -59,6 +63,22 @@ export default async function HomePage() {
         <BrandMark />
         <ThemeToggle />
       </div>
+
+      {searchParams?.journey === "completed" && (
+        <div
+          className="mb-5 rounded-card border border-line bg-card p-4"
+          style={{ borderColor: "#388E3C44", background: "#E8F5E9" }}
+        >
+          <div className="flex items-center gap-2">
+            <span className="text-lg">✅</span>
+            <b className="text-[15px] text-[#1565C0]">Journey Completed Safely</b>
+          </div>
+          <p className="mt-1 text-xs leading-[1.5] text-muted">
+            You&apos;re home safe — your trusted contacts have been notified
+            and the shared tracking link has been closed.
+          </p>
+        </div>
+      )}
 
       <div className="pt-[34px]">
         <div className="eyebrow">Protection that never sleeps</div>

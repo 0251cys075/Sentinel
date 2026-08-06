@@ -22,9 +22,9 @@ export interface Database {
         Update: { id?: string; trip_id?: string; lat?: number; lng?: number; recorded_at?: string; speed_kmh?: number | null; heading?: number | null; travel_mode?: string | null };
       };
       alerts: {
-        Row: { id: string; trip_id: string; user_id: string; type: 'nudge' | 'alarm' | 'contact_notify' | 'sos'; status: 'sent' | 'acknowledged' | 'resolved'; created_at: string; resolved_at: string | null };
-        Insert: { id?: string; trip_id: string; user_id: string; type: 'nudge' | 'alarm' | 'contact_notify' | 'sos'; status?: 'sent' | 'acknowledged' | 'resolved'; created_at?: string; resolved_at?: string | null };
-        Update: { id?: string; trip_id?: string; user_id?: string; type?: 'nudge' | 'alarm' | 'contact_notify' | 'sos'; status?: 'sent' | 'acknowledged' | 'resolved'; created_at?: string; resolved_at?: string | null };
+        Row: { id: string; trip_id: string; user_id: string; type: 'nudge' | 'alarm' | 'contact_notify' | 'sos' | 'arrived'; status: 'sent' | 'acknowledged' | 'resolved'; created_at: string; resolved_at: string | null };
+        Insert: { id?: string; trip_id: string; user_id: string; type: 'nudge' | 'alarm' | 'contact_notify' | 'sos' | 'arrived'; status?: 'sent' | 'acknowledged' | 'resolved'; created_at?: string; resolved_at?: string | null };
+        Update: { id?: string; trip_id?: string; user_id?: string; type?: 'nudge' | 'alarm' | 'contact_notify' | 'sos' | 'arrived'; status?: 'sent' | 'acknowledged' | 'resolved'; created_at?: string; resolved_at?: string | null };
       };
     };
   };

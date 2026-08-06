@@ -316,6 +316,199 @@ button {
   background: #df5946;
 }
 
+/* ─── UP Police 112 Emergency Video Call ─── */
+
+.police-call {
+  margin: -24px -18px -92px; /* cancel .screen padding for a full-bleed screen */
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  color: #fff;
+  background:
+    radial-gradient(1100px 460px at 18% -8%, #1a3c5e 0%, transparent 62%),
+    linear-gradient(170deg, #0a1826 0%, #10263b 55%, #17324e 100%);
+}
+
+.live-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: #d92a20;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 7px 11px;
+  border-radius: 999px;
+  box-shadow: 0 0 14px rgba(217, 42, 32, 0.65);
+  animation: live-glow 1.6s ease-in-out infinite;
+}
+
+@keyframes live-glow {
+  50% {
+    box-shadow: 0 0 26px rgba(217, 42, 32, 0.95);
+  }
+}
+
+.gps-stamp {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px;
+  letter-spacing: 0.02em;
+  color: #7dd3fc;
+  background: rgba(2, 10, 18, 0.55);
+  border: 1px solid rgba(125, 211, 252, 0.25);
+  padding: 6px 10px;
+  border-radius: 9px;
+}
+
+.call-timer {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.35);
+  padding: 5px 12px;
+  border-radius: 10px;
+}
+
+.secure-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+  font-size: 10px;
+  font-weight: 700;
+  color: #34d399;
+  background: rgba(52, 211, 153, 0.12);
+  border: 1px solid rgba(52, 211, 153, 0.35);
+  padding: 5px 10px;
+  border-radius: 999px;
+  margin-top: 10px;
+}
+
+.police-avatar {
+  position: relative;
+  width: 132px;
+  height: 132px;
+  margin: 26px auto 18px;
+}
+
+.police-avatar .pulse-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 3px solid #22c55e;
+  animation: ring-pulse 1.8s infinite;
+}
+
+.police-avatar img {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 50%;
+  border: 4px solid rgba(255, 255, 255, 0.92);
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.45);
+}
+
+@keyframes ring-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.55);
+  }
+  100% {
+    box-shadow: 0 0 0 18px rgba(34, 197, 94, 0);
+  }
+}
+
+.police-name {
+  font-family: var(--font-poppins), Poppins, sans-serif;
+  font-size: 24px;
+  font-weight: 700;
+  color: #fff;
+}
+
+.police-role {
+  margin-top: 4px;
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.72);
+}
+
+.callaction.accept {
+  background: #1b8d55;
+}
+
+.endcall-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: linear-gradient(180deg, #e0342a, #c4221a);
+  color: #fff;
+  font-weight: 800;
+  font-size: 14px;
+  padding: 15px 30px;
+  border-radius: 999px;
+  box-shadow: 0 0 16px rgba(217, 42, 32, 0.6);
+  transition: transform 0.12s;
+}
+
+.endcall-btn:active {
+  transform: scale(0.96);
+}
+
+.pip-wrap {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 118px;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 2px solid #22c55e;
+  box-shadow: 0 0 18px rgba(34, 197, 94, 0.55);
+  z-index: 5;
+  background: #000;
+}
+
+.pip-wrap video {
+  display: block;
+  width: 100%;
+  aspect-ratio: 3 / 4;
+  object-fit: cover;
+  transform: scaleX(-1); /* mirror like a selfie preview */
+  background: #000;
+}
+
+.pip-fallback {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  aspect-ratio: 3 / 4;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.6);
+  background: #0a0f14;
+}
+
+.pip-label {
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  text-align: center;
+  color: #052e16;
+  background: #4ade80;
+  padding: 4px 2px;
+}
+
 /* ─── SOS screen ─── */
 
 .sos {
