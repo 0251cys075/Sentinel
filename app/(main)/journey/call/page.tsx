@@ -13,12 +13,20 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useToast } from "@/components/toast";
 
+declare global {
+  // Active camera stream parked on window so the self-attaching <video>
+  // callback ref can grab it without racing the getUserMedia promise.
+  interface Window {
+    localStream?: MediaStream | null;
+  }
+}
+
 const OFFICER_NAME = "Inspector V. Sharma";
 const OFFICER_ROLE = "UP Police 112 Dispatch Control Room";
 
 /** Official Emblem of India badge — the primary officer portrait. */
 const OFFICER_AVATAR =
-  "https://upload.wikimedia.org/wikipedia/commons/thumb/5/55/Emblem_of_India.svg/300px-Emblem_of_India.svg.png";
+  "https://upload.wikimedia.org/wikipedia/commons/thumb/5/55/Emblem_of_India.svg/512px-Emblem_of_India.svg.png";
 
 /**
  * Inline UP Police badge (data URI) — the final safety net so a broken/failed
@@ -63,18 +71,23 @@ const SCRIPT: ScriptStage[] = [
   },
 ];
 
-/** Speak a line through the Web Speech API (Hindi/Indian English). */
+/** Speak a line through the Web Speech API (natural Hindi/Indian English). */
 function speakLine(text: string, lang = "hi-IN") {
   if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
   const utter = new SpeechSynthesisUtterance(text);
   utter.lang = lang;
-  utter.rate = 0.98; // calm, authoritative delivery
-  utter.pitch = 0.9;
   const voices = window.speechSynthesis.getVoices();
-  const voice =
-    voices.find((v) => v.lang?.toLowerCase().startsWith("hi")) ??
-    voices.find((v) => v.lang?.toLowerCase().replace("_", "-").startsWith("en-in"));
-  if (voice) utter.voice = voice;
+  // Dynamic voice filter: prefer a human-sounding Hindi/Indian voice.
+  const humanVoice = voices.find(
+    (v) =>
+      v.lang?.includes("hi") ||
+      v.name.includes("Google") ||
+      v.name.includes("India") ||
+      v.name.includes("Natural")
+  );
+  if (humanVoice) utter.voice = humanVoice;
+  utter.rate = 0.92; // natural speaking pace
+  utter.pitch = 0.95; // authoritative police tone
   window.speechSynthesis.speak(utter);
 }
 
@@ -95,7 +108,12 @@ function InspectorAvatar({ alt }: { alt: string }) {
     setSrc((prev) => (prev === OFFICER_AVATAR_FALLBACK ? prev : OFFICER_AVATAR_FALLBACK));
   return (
     /* eslint-disable-next-line @next/next/no-img-element -- remote portrait */
-    <img src={src} alt={alt} onError={onError} />
+    <img
+      src={src}
+      alt={alt}
+      onError={onError}
+      className="mx-auto h-28 w-28 rounded-full border-2 border-amber-500/60 bg-slate-900 object-contain p-2 shadow-lg shadow-amber-500/20"
+    />
   );
 }
 
@@ -108,7 +126,6 @@ export default function FakeCallPage() {
   const [camState, setCamState] = useState<"idle" | "live" | "denied">("idle");
   const [gps, setGps] = useState<GpsStamp>(FALLBACK_GPS);
 
-  const selfieVideoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const timersRef = useRef<number[]>([]);
   const gpsWatchRef = useRef<number | null>(null);
@@ -150,14 +167,8 @@ export default function FakeCallPage() {
         audio: false,
       });
       streamRef.current = stream;
-      if (selfieVideoRef.current) {
-        selfieVideoRef.current.srcObject = stream;
-        selfieVideoRef.current.onloadedmetadata = () => {
-          // Play inside onloadedmetadata so autoplay starts reliably
-          // (no silent browser block from a bare async play()).
-          selfieVideoRef.current?.play().catch((e) => console.error("Play error:", e));
-        };
-      }
+      // Park on window so the self-attaching video callback ref can bind to it.
+      window.localStream = stream;
       setCamState("live");
     } catch {
       setCamState("denied");
@@ -168,11 +179,9 @@ export default function FakeCallPage() {
     // 1. Stop every camera track (kills the red camera LED too).
     streamRef.current?.getTracks().forEach((track) => track.stop());
     streamRef.current = null;
-    // 2. Detach the stream from the <video> element.
-    if (selfieVideoRef.current) {
-      selfieVideoRef.current.onloadedmetadata = null;
-      selfieVideoRef.current.srcObject = null;
-    }
+    // 2. Clear the global stream handle — the <video> callback ref sees null
+    //    and no longer binds the dead stream.
+    window.localStream = null;
     // 3. Halt any queued/ongoing speech.
     if (typeof window !== "undefined" && "speechSynthesis" in window) {
       window.speechSynthesis.cancel();
@@ -279,11 +288,16 @@ export default function FakeCallPage() {
       </div>
 
       <div className="relative flex grow flex-col items-center justify-center px-6">
-        {/* ── Front camera evidence stream (PiP) ── */}
-        <div className="pip-wrap">
+        {/* ── Front camera evidence stream (self-attaching PiP node) ── */}
+        <div className="absolute top-16 right-4 z-20 h-44 w-32 overflow-hidden rounded-2xl border-2 border-emerald-500 bg-black shadow-2xl">
           {camState === "live" ? (
             <video
-              ref={selfieVideoRef}
+              ref={(node) => {
+                if (node && window.localStream) {
+                  node.srcObject = window.localStream;
+                  node.play().catch(() => {});
+                }
+              }}
               autoPlay
               playsInline
               muted
@@ -297,7 +311,11 @@ export default function FakeCallPage() {
           ) : (
             <div className="pip-fallback">📷 Starting camera…</div>
           )}
-          <div className={`pip-label${camState === "live" ? "" : " off"}`}>
+          <div
+            className={`absolute inset-x-0 bottom-0 py-0.5 text-center font-mono text-[9px] font-bold${
+              camState === "live" ? " bg-emerald-500 text-black" : " bg-red-500 text-white"
+            }`}
+          >
             {camState === "live" ? "EVIDENCE STREAM TRANSMITTED" : "VIDEO FEED BLOCKED"}
           </div>
         </div>
