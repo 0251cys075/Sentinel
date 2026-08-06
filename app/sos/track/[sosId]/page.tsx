@@ -16,13 +16,11 @@ const POLL_MS = 10_000;
  *
  * URL: /sos/track/[sosId]?token=<guestToken>
  *
- * The guest token is minted in the app when the SOS is triggered, stored on
- * the alert row, and expired after 4 hours (or when the alert is resolved).
- * We ONLY trust rows that come back from get_public_sos_track() — that
- * SECURITY DEFINER function verifies the token, its expiry, the alert being
- * unresolved, and the trip still being active. Invalid/expired/missing
- * tokens return an empty set, which renders the "no longer active" screen.
- * No GitHub login, no Sentinel account, no session cookies required.
+ * Uses a direct Supabase table query (no RPC, no auth session required).
+ * The guest_token column on the alerts table acts as the capability token.
+ * Expiration is bypassed for now — only `status === 'resolved'` invalidates
+ * the link. If the query fails or returns no rows, a debug paragraph is
+ * rendered so we can diagnose Incognito-mode issues.
  */
 function SosTrackScreen() {
   const { sosId } = useParams<{ sosId: string }>();
@@ -32,11 +30,11 @@ function SosTrackScreen() {
   const [trip, setTrip] = useState<Trip | null>(null);
   const [trail, setTrail] = useState<TripLocation[]>([]);
   const [notFound, setNotFound] = useState(false);
+  const [debugInfo, setDebugInfo] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
-    // Defensive: never fire a query for a detonated/missing token — the
-    // click through from an SMS will always include it.
+    // Defensive: never fire a query for a missing token.
     if (!sosId || !token) {
       setNotFound(true);
       return;
@@ -45,29 +43,62 @@ function SosTrackScreen() {
     const supabase = getSupabaseBrowser();
 
     const load = async () => {
-      // Token-verified trip lookup — empty on wrong/expired/resolved.
-      const tripRes = await supabase.rpc("get_public_sos_track", {
-        p_alert_id: sosId,
-        p_token: token,
-      });
+      // ── Fetch the alert directly by id + guest_token ──────
+      // No auth session required — the anon/public client handles this.
+      const { data: alert, error } = await supabase
+        .from("alerts")
+        .select("*")
+        .eq("id", sosId)
+        .eq("guest_token", token)
+        .maybeSingle();
 
-      if (tripRes.error || !tripRes.data) {
+      // ── Debug display if the query failed or returned nothing ──
+      if (error || !alert) {
+        const parts: string[] = [];
+        parts.push(`sosId=${sosId}`);
+        parts.push(`token=${token}`);
+        if (error) parts.push(`DB Error=${error.message}`);
+        else parts.push("DB Error=no rows returned");
+        setDebugInfo(parts.join(" | "));
         setNotFound(true);
         return;
       }
 
-      // Function returns setof trips (array) — take the first row.
-      const tripData = Array.isArray(tripRes.data) ? tripRes.data[0] : tripRes.data;
-      if (!tripData) {
+      // ── Bypass expiration check for now ────────────────────
+      // Only invalidate if the alert is resolved.
+      if (alert.status === "resolved") {
+        setDebugInfo(
+          `sosId=${sosId} | token=${token} | reason=alert status is 'resolved'`
+        );
         setNotFound(true);
         return;
       }
+
+      // ── Resolve alert → trip ──────────────────────────────
+      const { data: tripData, error: tripError } = await supabase
+        .from("trips")
+        .select("*")
+        .eq("id", alert.trip_id)
+        .maybeSingle();
+
+      if (tripError || !tripData) {
+        setDebugInfo(
+          `sosId=${sosId} | token=${token} | tripError=${tripError?.message ?? "no trip found"}`
+        );
+        setNotFound(true);
+        return;
+      }
+
       setTrip(tripData as Trip);
 
-      // Live location trail for this alert's trip.
-      const trailRes = await supabase.rpc("get_public_trip_locations", {
-        p_trip_id: tripData.id,
-      });
+      // ── Live location trail ───────────────────────────────
+      const trailRes = await supabase
+        .from("trip_locations")
+        .select("*")
+        .eq("trip_id", tripData.id)
+        .order("recorded_at", { ascending: true })
+        .limit(500);
+
       setTrail((trailRes.data ?? []) as TripLocation[]);
     };
 
@@ -86,6 +117,11 @@ function SosTrackScreen() {
         <p className="mt-24 text-muted">
           This SOS alert is no longer active or the link has expired.
         </p>
+        {debugInfo && (
+          <p className="mt-4 text-xs text-muted" style={{ maxWidth: 480, margin: "1rem auto 0" }}>
+            Debug Info: {debugInfo}
+          </p>
+        )}
       </div>
     );
   }
