@@ -50,6 +50,12 @@ export interface TripLocation {
   lat: number;
   lng: number;
   recorded_at: string;
+  /** Live telemetry (m/s · 3.6, haversine fallback if the device GPS lacks it). */
+  speed_kmh: number | null;
+  /** Degrees from true north (0-360) or null when the device has no heading. */
+  heading: number | null;
+  /** trips.transit_mode captured at insert time. */
+  travel_mode: string | null;
 }
 
 export interface Alert {
@@ -111,6 +117,9 @@ export interface TripLocationInsert {
   trip_id: string;
   lat: number;
   lng: number;
+  speed_kmh?: number | null;
+  heading?: number | null;
+  travel_mode?: string | null;
 }
 
 export interface AlertInsert {

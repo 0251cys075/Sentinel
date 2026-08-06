@@ -1,15 +1,24 @@
 "use client";
 
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useCallback } from "react";
+import dynamic from "next/dynamic";
 import { useParams, useSearchParams } from "next/navigation";
 import { getSupabaseBrowser } from "@/lib/supabase/client";
 import { BrandMark } from "@/components/shell";
 import { Card } from "@/components/primitives";
+import { SpeedBadge } from "@/components/speed-badge";
+import { useGuestTracking } from "@/lib/use-guest-tracking";
+import { useStreetName } from "@/lib/use-street-name";
 import type { Trip, TripLocation } from "@/lib/types";
 
-const STALE_AFTER_MS = 120_000;
-const LIVE_AFTER_MS = 45_000;
-const POLL_MS = 10_000;
+const LiveNavMap = dynamic(() => import("@/components/live-nav-map").then((m) => m.LiveNavMap), {
+  ssr: false,
+  loading: () => (
+    <div className="absolute inset-0 grid place-items-center text-xs text-muted">
+      Loading map…
+    </div>
+  ),
+});
 
 /**
  * Public, no-login SOS live tracking for emergency contacts.
@@ -19,97 +28,80 @@ const POLL_MS = 10_000;
  * Uses a direct Supabase table query (no RPC, no auth session required).
  * The guest_token column on the alerts table acts as the capability token.
  * Expiration is bypassed for now — only `status === 'resolved'` invalidates
- * the link. If the query fails or returns no rows, a debug paragraph is
- * rendered so we can diagnose Incognito-mode issues.
+ * the link. Live position + speed stream in via Supabase Realtime. If the
+ * query fails or returns no rows, a debug paragraph is rendered so we can
+ * diagnose Incognito-mode issues.
  */
 function SosTrackScreen() {
   const { sosId } = useParams<{ sosId: string }>();
   const searchParams = useSearchParams();
   const token = searchParams.get("token") ?? "";
 
-  const [trip, setTrip] = useState<Trip | null>(null);
-  const [trail, setTrail] = useState<TripLocation[]>([]);
-  const [notFound, setNotFound] = useState(false);
-  const [debugInfo, setDebugInfo] = useState<string | null>(null);
-  const [now, setNow] = useState(() => Date.now());
-
-  useEffect(() => {
+  const load = useCallback(async () => {
     // Defensive: never fire a query for a missing token.
-    if (!sosId || !token) {
-      setNotFound(true);
-      return;
-    }
+    if (!sosId || !token) return { ok: false as const };
 
     const supabase = getSupabaseBrowser();
 
-    const load = async () => {
-      // ── Fetch the alert directly by id + guest_token ──────
-      // No auth session required — the anon/public client handles this.
-      const { data: alert, error } = await supabase
-        .from("alerts")
-        .select("*")
-        .eq("id", sosId)
-        .eq("guest_token", token)
-        .maybeSingle();
+    // ── Fetch the alert directly by id + guest_token ──────
+    // No auth session required — the anon/public client handles this.
+    const { data: alert, error } = await supabase
+      .from("alerts")
+      .select("*")
+      .eq("id", sosId)
+      .eq("guest_token", token)
+      .maybeSingle();
 
-      // ── Debug display if the query failed or returned nothing ──
-      if (error || !alert) {
-        const parts: string[] = [];
-        parts.push(`sosId=${sosId}`);
-        parts.push(`token=${token}`);
-        if (error) parts.push(`DB Error=${error.message}`);
-        else parts.push("DB Error=no rows returned");
-        setDebugInfo(parts.join(" | "));
-        setNotFound(true);
-        return;
-      }
+    // ── Debug display if the query failed or returned nothing ──
+    if (error || !alert) {
+      const parts: string[] = [];
+      parts.push(`sosId=${sosId}`);
+      parts.push(`token=${token}`);
+      if (error) parts.push(`DB Error=${error.message}`);
+      else parts.push("DB Error=no rows returned");
+      return { ok: false as const, debug: parts.join(" | ") };
+    }
 
-      // ── Bypass expiration check for now ────────────────────
-      // Only invalidate if the alert is resolved.
-      if (alert.status === "resolved") {
-        setDebugInfo(
-          `sosId=${sosId} | token=${token} | reason=alert status is 'resolved'`
-        );
-        setNotFound(true);
-        return;
-      }
+    // ── Bypass expiration check for now ────────────────────
+    // Only invalidate if the alert is resolved.
+    if (alert.status === "resolved") {
+      return {
+        ok: false as const,
+        debug: `sosId=${sosId} | token=${token} | reason=alert status is 'resolved'`,
+      };
+    }
 
-      // ── Resolve alert → trip ──────────────────────────────
-      const { data: tripData, error: tripError } = await supabase
-        .from("trips")
-        .select("*")
-        .eq("id", alert.trip_id)
-        .maybeSingle();
+    // ── Resolve alert → trip ──────────────────────────────
+    const { data: tripData, error: tripError } = await supabase
+      .from("trips")
+      .select("*")
+      .eq("id", alert.trip_id)
+      .maybeSingle();
 
-      if (tripError || !tripData) {
-        setDebugInfo(
-          `sosId=${sosId} | token=${token} | tripError=${tripError?.message ?? "no trip found"}`
-        );
-        setNotFound(true);
-        return;
-      }
+    if (tripError || !tripData) {
+      return {
+        ok: false as const,
+        debug: `sosId=${sosId} | token=${token} | tripError=${tripError?.message ?? "no trip found"}`,
+      };
+    }
 
-      setTrip(tripData as Trip);
+    // ── Live location trail (Realtime keeps appending after load) ──
+    const trailRes = await supabase
+      .from("trip_locations")
+      .select("*")
+      .eq("trip_id", tripData.id)
+      .order("recorded_at", { ascending: true })
+      .limit(500);
 
-      // ── Live location trail ───────────────────────────────
-      const trailRes = await supabase
-        .from("trip_locations")
-        .select("*")
-        .eq("trip_id", tripData.id)
-        .order("recorded_at", { ascending: true })
-        .limit(500);
-
-      setTrail((trailRes.data ?? []) as TripLocation[]);
-    };
-
-    load();
-    const pollTimer = setInterval(load, POLL_MS);
-    const tickTimer = setInterval(() => setNow(Date.now()), 5_000);
-    return () => {
-      clearInterval(pollTimer);
-      clearInterval(tickTimer);
+    return {
+      ok: true as const,
+      trip: tripData as Trip,
+      trail: (trailRes.data ?? []) as TripLocation[],
     };
   }, [sosId, token]);
+
+  const { trip, trail, latest, badge, notFound, debug } = useGuestTracking(load);
+  const street = useStreetName(latest?.lat ?? null, latest?.lng ?? null);
 
   if (notFound) {
     return (
@@ -117,9 +109,9 @@ function SosTrackScreen() {
         <p className="mt-24 text-muted">
           This SOS alert is no longer active or the link has expired.
         </p>
-        {debugInfo && (
+        {debug && (
           <p className="mt-4 text-xs text-muted" style={{ maxWidth: 480, margin: "1rem auto 0" }}>
-            Debug Info: {debugInfo}
+            Debug Info: {debug}
           </p>
         )}
       </div>
@@ -135,14 +127,10 @@ function SosTrackScreen() {
     );
   }
 
-  const latest = trail[trail.length - 1];
-  const ageMs = latest ? now - new Date(latest.recorded_at).getTime() : Infinity;
-  const badge =
-    ageMs < LIVE_AFTER_MS
-      ? { cls: "live", txt: "● Live now" }
-      : ageMs < STALE_AFTER_MS
-        ? { cls: "upd", txt: `● Updated ${Math.floor(ageMs / 60_000)} min ago` }
-        : { cls: "stale", txt: `● Last seen ${Math.floor(ageMs / 60_000)} min ago` };
+  const destination =
+    trip.destination_lat != null && trip.destination_lng != null
+      ? { lat: trip.destination_lat, lng: trip.destination_lng }
+      : null;
 
   return (
     <div className="app-shell">
@@ -176,19 +164,25 @@ function SosTrackScreen() {
           </p>
         </div>
 
-        {/* ── Map / location area ─────────────────────────────────── */}
+        {/* ── Live map + speed overlay ── */}
         <div className="map">
+          <LiveNavMap
+            trail={trail.map((t) => ({ lat: t.lat, lng: t.lng }))}
+            user={latest ?? null}
+            destination={destination}
+          />
           <div className={`mapbadge ${badge.cls}`}>{badge.txt}</div>
           <div className="livebar">
-            <div>
+            <div className="min-w-0 pr-3">
               <b>{latest ? "Position shared" : "Awaiting first fix"}</b>
               <br />
               <small className="text-muted">
                 {latest
-                  ? `${latest.lat.toFixed(5)}, ${latest.lng.toFixed(5)}`
+                  ? street ?? `${latest.lat.toFixed(5)}, ${latest.lng.toFixed(5)}`
                   : "No location yet"}
               </small>
             </div>
+            {latest ? <SpeedBadge kmh={latest.speed_kmh} /> : null}
           </div>
         </div>
 
@@ -196,9 +190,9 @@ function SosTrackScreen() {
         <Card className="mt-3">
           <b>What does this mean?</b>
           <p className="mt-1 text-xs leading-[1.5] text-muted">
-            This person pressed the SOS button in the Sentinel app. Their last known location
-            is shown above. Please try to contact them directly or alert emergency services if
-            needed.
+            This person pressed the SOS button in the Sentinel app. Their live location
+            and speed are shown above. Please try to contact them directly or alert
+            emergency services if needed.
           </p>
         </Card>
       </div>

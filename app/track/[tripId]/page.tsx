@@ -1,51 +1,51 @@
 "use client";
 
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useCallback } from "react";
+import dynamic from "next/dynamic";
 import { useParams } from "next/navigation";
 import { getSupabaseBrowser } from "@/lib/supabase/client";
 import { BrandMark } from "@/components/shell";
 import { Card, DemoBadge } from "@/components/primitives";
+import { SpeedBadge } from "@/components/speed-badge";
+import { useGuestTracking } from "@/lib/use-guest-tracking";
+import { useStreetName } from "@/lib/use-street-name";
 import type { Trip, TripLocation } from "@/lib/types";
 
-const STALE_AFTER_MS = 120_000;
-const LIVE_AFTER_MS = 45_000;
-const POLL_MS = 10_000;
+const LiveNavMap = dynamic(() => import("@/components/live-nav-map").then((m) => m.LiveNavMap), {
+  ssr: false,
+  loading: () => (
+    <div className="absolute inset-0 grid place-items-center text-xs text-muted">
+      Loading map…
+    </div>
+  ),
+});
 
 /**
  * Read-only "track this trip" view shared with trusted contacts via the
  * push notification link. Works without an account: it reads through
- * SECURITY DEFINER functions (see supabase/share.sql) so a person holding
- * the link can follow the journey. Unguessable UUID = the capability.
+ * SECURITY DEFINER functions (see supabase/share.sql) and subscribes to
+ * Supabase Realtime so the live position + speed update in real time.
+ * Unguessable UUID = the capability.
  */
 function TrackScreen() {
   const { tripId } = useParams<{ tripId: string }>();
-  const [trip, setTrip] = useState<Trip | null>(null);
-  const [trail, setTrail] = useState<TripLocation[]>([]);
-  const [notFound, setNotFound] = useState(false);
-  const [now, setNow] = useState(() => Date.now());
 
-  useEffect(() => {
+  const load = useCallback(async () => {
     const supabase = getSupabaseBrowser();
-    const load = async () => {
-      const [tripRes, trailRes] = await Promise.all([
-        supabase.rpc("get_public_trip", { p_trip_id: tripId }),
-        supabase.rpc("get_public_trip_locations", { p_trip_id: tripId }),
-      ]);
-      if (tripRes.error || !tripRes.data) {
-        setNotFound(true);
-        return;
-      }
-      setTrip(tripRes.data as Trip);
-      setTrail((trailRes.data ?? []) as TripLocation[]);
-    };
-    load();
-    const t = setInterval(load, POLL_MS);
-    const tick = setInterval(() => setNow(Date.now()), 5000);
-    return () => {
-      clearInterval(t);
-      clearInterval(tick);
+    const [tripRes, trailRes] = await Promise.all([
+      supabase.rpc("get_public_trip", { p_trip_id: tripId }),
+      supabase.rpc("get_public_trip_locations", { p_trip_id: tripId }),
+    ]);
+    if (tripRes.error || !tripRes.data) return { ok: false as const };
+    return {
+      ok: true as const,
+      trip: tripRes.data as Trip,
+      trail: (trailRes.data ?? []) as TripLocation[],
     };
   }, [tripId]);
+
+  const { trip, trail, latest, badge, notFound } = useGuestTracking(load);
+  const street = useStreetName(latest?.lat ?? null, latest?.lng ?? null);
 
   if (notFound) {
     return (
@@ -64,14 +64,10 @@ function TrackScreen() {
     );
   }
 
-  const latest = trail[trail.length - 1];
-  const ageMs = latest ? now - new Date(latest.recorded_at).getTime() : Infinity;
-  const badge =
-    ageMs < LIVE_AFTER_MS
-      ? { cls: "live", txt: "● Live now" }
-      : ageMs < STALE_AFTER_MS
-        ? { cls: "upd", txt: `● Updated ${Math.floor(ageMs / 60000)} min ago` }
-        : { cls: "stale", txt: `● Last seen ${Math.floor(ageMs / 60000)} min ago` };
+  const destination =
+    trip.destination_lat != null && trip.destination_lng != null
+      ? { lat: trip.destination_lat, lng: trip.destination_lng }
+      : null;
 
   return (
     <div className="app-shell">
@@ -101,18 +97,25 @@ function TrackScreen() {
           )}
         </div>
 
+        {/* ── Live map + speed overlay ── */}
         <div className="map">
+          <LiveNavMap
+            trail={trail.map((t) => ({ lat: t.lat, lng: t.lng }))}
+            user={latest ?? null}
+            destination={destination}
+          />
           <div className={`mapbadge ${badge.cls}`}>{badge.txt}</div>
           <div className="livebar">
-            <div>
+            <div className="min-w-0 pr-3">
               <b>{latest ? "Position shared" : "Awaiting first fix"}</b>
               <br />
               <small className="text-muted">
                 {latest
-                  ? `${latest.lat.toFixed(5)}, ${latest.lng.toFixed(5)}`
+                  ? street ?? `${latest.lat.toFixed(5)}, ${latest.lng.toFixed(5)}`
                   : "No location yet"}
               </small>
             </div>
+            {latest ? <SpeedBadge kmh={latest.speed_kmh} /> : null}
           </div>
         </div>
 
@@ -120,7 +123,7 @@ function TrackScreen() {
           <b>About this share</b>
           <p className="mt-1 text-xs leading-[1.5] text-muted">
             The traveler asked Sentinel to share this journey with you. It
-            updates every few seconds while active and stops when the trip
+            updates in real time while active and stops when the trip
             ends.
           </p>
         </Card>

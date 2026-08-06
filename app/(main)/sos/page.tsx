@@ -13,6 +13,9 @@ import {
 } from "@/lib/sos";
 import { useToast } from "@/components/toast";
 import { Card } from "@/components/primitives";
+import { SpeedBadge } from "@/components/speed-badge";
+import { useLiveTelemetry } from "@/lib/use-live-telemetry";
+import { useStreetName } from "@/lib/use-street-name";
 
 const SOS_COUNTDOWN_SECONDS = 8;
 
@@ -39,6 +42,19 @@ function SosScreen() {
   const [primaryContacts, setPrimaryContacts] = useState<PrimaryContact[]>([]);
   const [sending, setSending] = useState(false);
   const [confirmed, setConfirmed] = useState(false);
+
+  /** Trip being streamed live after SOS fires (see confirmSos). */
+  const [streamTripId, setStreamTripId] = useState<string | null>(null);
+
+  // ── Feature 1: high-accuracy GPS stream starts the instant SOS fires,
+  //    broadcasting speed_kmh / heading / travel_mode to trip_locations so
+  //    the no-login guest tracking page updates via Supabase Realtime. ──
+  const tel = useLiveTelemetry({
+    tripId: streamTripId,
+    enabled: confirmed && !!streamTripId,
+    travelMode: "Walk",
+  });
+  const sosStreet = useStreetName(tel.gps?.lat ?? null, tel.gps?.lng ?? null);
 
   /** What got handed out after a successful SOS (guest link + SMS targets). */
   const [shareInfo, setShareInfo] = useState<{
@@ -136,6 +152,7 @@ function SosScreen() {
         : null;
 
       const tripId = await resolveTripId(user.id);
+      setStreamTripId(tripId); // start streaming live telemetry immediately
       const { data: alert, error } = await supabase
         .from("alerts")
         .insert({
@@ -295,6 +312,33 @@ function SosScreen() {
             Copy tracking link
           </button>
         )}
+
+        {/* ── Live telemetry: GPS stream + speed broadcast to guests ── */}
+        <div className="mt-4 rounded-[14px] border border-line bg-card p-4 text-left">
+          <div className="flex items-center justify-between">
+            <b className="text-sm">Live location sharing</b>
+            <span className="dot pulse" />
+          </div>
+          <div className="mt-2 flex items-center gap-2">
+            <SpeedBadge kmh={tel.effectiveSpeedKmh} />
+            <span className="min-w-0 text-xs text-muted">
+              {tel.gpsError
+                ? "No GPS fix — retrying…"
+                : tel.gps
+                  ? `📍 ${sosStreet ?? `${tel.gps.lat.toFixed(5)}, ${tel.gps.lng.toFixed(5)}`}`
+                  : "Acquiring GPS fix…"}
+            </span>
+          </div>
+          {streamTripId && (
+            <button
+              type="button"
+              onClick={() => router.push(`/journey/live?trip=${streamTripId}`)}
+              className="mt-3 w-full rounded-[13px] bg-primary2 px-4 py-[13px] text-sm font-bold text-primary"
+            >
+              Open live journey map
+            </button>
+          )}
+        </div>
 
         <button
           type="button"

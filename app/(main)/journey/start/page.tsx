@@ -83,6 +83,27 @@ export default function StartJourneyPage() {
       if (error) throw error;
       toast(`Journey started — arrive by ${arrival.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`);
       router.push(`/journey/live?trip=${data.id}`);
+
+      // Best-effort geocode so the live map can draw an origin→destination
+      // polyline and compute a real dynamic ETA. Non-blocking: the journey
+      // still starts if geocoding fails.
+      void (async () => {
+        try {
+          const res = await fetch(
+            `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(destination.trim())}&limit=1`
+          );
+          if (!res.ok) return;
+          const geo = (await res.json()) as { lat: string; lon: string }[];
+          const match = geo[0];
+          if (!match) return;
+          await getSupabaseBrowser()
+            .from("trips")
+            .update({ destination_lat: parseFloat(match.lat), destination_lng: parseFloat(match.lon) })
+            .eq("id", data.id);
+        } catch {
+          // silently ignore — optional enrichment only
+        }
+      })();
     } catch (err) {
       toast(err instanceof Error ? err.message : "Could not start journey");
     } finally {
