@@ -60,6 +60,10 @@ export interface Alert {
   status: "pending" | "sent" | "resolved";
   created_at: string;
   resolved_at: string | null;
+  /** Capability token that lets guests view live SOS tracking without login. */
+  guest_token: string | null;
+  /** When guest_token stops working. null = never issued (or revoked). */
+  guest_token_expires_at: string | null;
 }
 
 export interface FcmToken {
@@ -114,6 +118,8 @@ export interface AlertInsert {
   user_id: string;
   type: AlertType;
   status?: "pending" | "sent" | "resolved";
+  guest_token?: string | null;
+  guest_token_expires_at?: string | null;
 }
 
 export interface FcmTokenInsert {

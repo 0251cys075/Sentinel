@@ -3,11 +3,31 @@
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { getSupabaseBrowser } from "@/lib/supabase/client";
-import { notifySosSmsDemo } from "@/lib/sos";
+import {
+  buildGuestTrackUrl,
+  buildSosMessage,
+  buildSosSmsDeepLink,
+  generateGuestToken,
+  guestTokenExpiry,
+  isMobileDevice,
+} from "@/lib/sos";
 import { useToast } from "@/components/toast";
 import { Card } from "@/components/primitives";
 
 const SOS_COUNTDOWN_SECONDS = 8;
+
+interface PrimaryContact {
+  name: string;
+  phone: string;
+}
+
+/** Absolute base for the guest link — env override when set, else live origin. */
+function appBaseUrl(): string {
+  const configured = process.env.NEXT_PUBLIC_APP_URL;
+  if (configured) return configured.replace(/\/+$/, "");
+  if (typeof window !== "undefined" && window.location.origin) return window.location.origin;
+  return "";
+}
 
 function SosScreen() {
   const router = useRouter();
@@ -16,17 +36,37 @@ function SosScreen() {
   const tripIdParam = params.get("trip") ?? "";
 
   const [left, setLeft] = useState(SOS_COUNTDOWN_SECONDS);
-  const [primaryContacts, setPrimaryContacts] = useState<string[]>([]);
+  const [primaryContacts, setPrimaryContacts] = useState<PrimaryContact[]>([]);
   const [sending, setSending] = useState(false);
   const [confirmed, setConfirmed] = useState(false);
+
+  /** What got handed out after a successful SOS (guest link + SMS targets). */
+  const [shareInfo, setShareInfo] = useState<{
+    guestUrl: string;
+    smsUris: { name: string; uri: string }[];
+  } | null>(null);
+
   const doneRef = useRef(false);
+  const smsFiredRef = useRef(false);
+
+  // Latest primary contacts reachable inside async closures without
+  // re-creating `confirmSos` on every contacts fetch.
+  const primaryContactsRef = useRef<PrimaryContact[]>([]);
+  useEffect(() => {
+    primaryContactsRef.current = primaryContacts;
+  }, [primaryContacts]);
 
   useEffect(() => {
     getSupabaseBrowser()
       .from("trusted_contacts")
-      .select("name")
+      .select("name, phone")
       .eq("tier", "primary")
-      .then(({ data }) => setPrimaryContacts((data ?? []).map((c) => c.name)));
+      .eq("verified", true)
+      .then(({ data }) =>
+        setPrimaryContacts(
+          (data ?? []).map((c) => ({ name: c.name, phone: c.phone }) as PrimaryContact)
+        )
+      );
   }, []);
 
   /**
@@ -71,7 +111,11 @@ function SosScreen() {
     [tripIdParam]
   );
 
-  /** Insert the `sos` alert for the current user, then fire the demo notify. */
+  /**
+   * Insert the `sos` alert (with its public guest tracking token), hand the
+   * tokenized link to the notification API, then compose the sms: deep links
+   * for the primary contacts.
+   */
   const confirmSos = useCallback(async (): Promise<boolean> => {
     if (doneRef.current) return false;
     doneRef.current = true;
@@ -83,6 +127,14 @@ function SosScreen() {
       } = await supabase.auth.getUser();
       if (!user) throw new Error("Not signed in");
 
+      // Mint the capability token BEFORE the insert so the alert row ships
+      // with it in one atomic statement. Missing crypto degrades to no
+      // guest link / no SMS — the SOS still goes out via email + push.
+      const guestToken = generateGuestToken();
+      const guestTokenExpiresAt = guestToken
+        ? guestTokenExpiry()
+        : null;
+
       const tripId = await resolveTripId(user.id);
       const { data: alert, error } = await supabase
         .from("alerts")
@@ -92,6 +144,8 @@ function SosScreen() {
           type: "sos",
           status: "sent",
           created_at: new Date().toISOString(),
+          guest_token: guestToken || null,
+          guest_token_expires_at: guestTokenExpiresAt,
         })
         .select("id")
         .single();
@@ -100,16 +154,37 @@ function SosScreen() {
         throw error;
       }
 
-      notifySosSmsDemo();
+      // Public guest link — the ONLY thing contacts need to view live updates.
+      const guestUrl = guestToken
+        ? buildGuestTrackUrl(appBaseUrl(), alert.id, guestToken)
+        : "";
 
       // Fire real notifications in the background — never block the success
-      // screen on WhatsApp/email delivery.
+      // screen on email/push delivery. Pass the canonical link so emails and
+      // push open the same (tokenized) tracking page.
       void fetch("/api/sos-notify", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId: user.id, alertId: alert.id }),
+        body: JSON.stringify({ userId: user.id, alertId: alert.id, trackUrl: guestUrl }),
       }).catch((err) => console.error("[sos-notify] background fetch failed:", err));
 
+      // Compose the native SMS deep links for Feature 2. Missing phones or a
+      // missing token are handled gracefully: we simply don't build URI(s).
+      const smsUris: { name: string; uri: string }[] = [];
+      if (guestUrl && primaryContactsRef.current.length) {
+        const { data: profile } = await supabase
+          .from("profiles")
+          .select("full_name")
+          .eq("id", user.id)
+          .maybeSingle();
+        const message = buildSosMessage(profile?.full_name, guestUrl);
+        for (const contact of primaryContactsRef.current) {
+          const uri = buildSosSmsDeepLink(contact.phone, message);
+          if (uri) smsUris.push({ name: contact.name, uri });
+        }
+      }
+
+      setShareInfo({ guestUrl: guestUrl ?? "", smsUris });
       return true;
     } catch (err) {
       doneRef.current = false;
@@ -157,7 +232,30 @@ function SosScreen() {
     else router.push("/");
   };
 
+  /* Feature 2: on phones, bounce straight into the SMS composer pre-filled
+   * with the no-login guest link. Desktop keeps the on-screen buttons. */
+  useEffect(() => {
+    if (!confirmed || !shareInfo || smsFiredRef.current) return;
+    smsFiredRef.current = true;
+    if (!isMobileDevice(navigator.userAgent) || !shareInfo.smsUris.length) return;
+    const t = setTimeout(() => {
+      window.location.href = shareInfo.smsUris[0].uri;
+    }, 1200);
+    return () => clearTimeout(t);
+  }, [confirmed, shareInfo]);
+
+  const copyGuestLink = async () => {
+    if (!shareInfo?.guestUrl) return;
+    try {
+      await navigator.clipboard.writeText(shareInfo.guestUrl);
+      toast("Tracking link copied");
+    } catch {
+      toast("Could not copy — send one of the sms: links instead");
+    }
+  };
+
   if (confirmed) {
+    const smsTargets = shareInfo?.smsUris ?? [];
     return (
       <div className="sos">
         <div className="soscheck">
@@ -168,8 +266,36 @@ function SosScreen() {
           Help is on the way
         </h1>
         <p className="mt-3 leading-[1.6] text-muted">
-          Your trusted contacts have been notified with your location.
+          {smsTargets.length
+            ? "Opening your SMS app for the first contact — one tap and the live tracking link goes out."
+            : "Your trusted contacts have been notified with your location."}
         </p>
+
+        {smsTargets.length > 0 && (
+          <div className="mt-4 text-left">
+            <div className="eyebrow mb-2">Send live tracking SMS</div>
+            {smsTargets.map((t) => (
+              <a
+                key={t.uri}
+                href={t.uri}
+                className="mb-2 block w-full rounded-[13px] bg-primary2 px-4 py-[13px] text-center font-bold text-primary"
+              >
+                Open SMS for {t.name}
+              </a>
+            ))}
+          </div>
+        )}
+
+        {shareInfo?.guestUrl && (
+          <button
+            type="button"
+            onClick={copyGuestLink}
+            className="mt-2.5 w-full rounded-[13px] bg-card px-4 py-[13px] font-bold text-primary"
+          >
+            Copy tracking link
+          </button>
+        )}
+
         <button
           type="button"
           onClick={() => router.push("/")}
@@ -182,7 +308,7 @@ function SosScreen() {
   }
 
   const names = primaryContacts.length
-    ? primaryContacts.join(" and ")
+    ? primaryContacts.map((c) => c.name).join(" and ")
     : "your trusted contacts";
 
   return (

@@ -27,8 +27,45 @@ const RESEND_SHARED_FROM = "onboarding@resend.dev";
 /** Delay before sending the escalating follow-up email (ms). */
 const ESCALATION_DELAY_MS = 3 * 60 * 1000; // 3 minutes
 
+/**
+ * Resolve the canonical tracking URL for an alert.
+ *
+ * 1. If SUPABASE_SERVICE_ROLE_KEY is set, read the alert's
+ *    guest_token from the DB (service role bypasses RLS) and
+ *    build the no-login /sos/track URL — this is the canonical,
+ *    short-lived share link.
+ * 2. Otherwise fall back to the token the client just minted
+ *    (body.trackUrl), then to the legacy /track/alert page.
+ */
+async function resolveTrackUrl(
+  alertId: string,
+  clientTrackUrl: string | undefined
+): Promise<string> {
+  const adminClient = createServiceSupabase();
+  if (adminClient) {
+    const { data: alert, error } = await adminClient
+      .from("alerts")
+      .select("guest_token")
+      .eq("id", alertId)
+      .maybeSingle();
+
+    if (error) {
+      console.error("[sos-notify] guest_token fetch failed:", error);
+    } else if (alert?.guest_token) {
+      const base =
+        process.env.NEXT_PUBLIC_APP_URL?.replace(/\/+$/, "") ?? "";
+      return `${base}/sos/track/${encodeURIComponent(alertId)}?token=${encodeURIComponent(alert.guest_token)}`;
+    }
+  }
+
+  if (clientTrackUrl) return clientTrackUrl;
+
+  const base = process.env.NEXT_PUBLIC_APP_URL?.replace(/\/+$/, "") ?? "";
+  return `${base}/track/alert/${encodeURIComponent(alertId)}`;
+}
+
 export async function POST(request: Request) {
-  let body: { userId?: string; alertId?: string };
+  let body: { userId?: string; alertId?: string; trackUrl?: string };
   try {
     body = await request.json();
   } catch {
@@ -85,6 +122,12 @@ export async function POST(request: Request) {
   // Custom-domain sender falls back to Resend's shared account-only domain.
   const fromAddress = process.env.RESEND_FROM_EMAIL?.trim() || RESEND_SHARED_FROM;
 
+  // ─── Track link ───────────────────────────────────────────────────────
+  // Prefer the DB-canonical guest token (fetched with the service-role key)
+  // so links always point at the public, no-login /sos/track page. Falls
+  // back to the token the client just minted, then to the legacy alert page.
+  const trackUrl = await resolveTrackUrl(alertId, body.trackUrl);
+
   // ─── 1. Confirmation email to the user who triggered the SOS ───────────────
   if (caller.email) {
     const { data, error } = await resend.emails.send({
@@ -104,8 +147,6 @@ export async function POST(request: Request) {
   }
 
   // ─── 2. Emergency email to every verified primary contact ──────────────────
-  const trackUrl = `${process.env.NEXT_PUBLIC_APP_URL ?? ""}/track/alert/${alertId}`;
-
   for (const contact of contacts) {
     if (!contact.email) {
       console.log(`[sos-notify] skipping contact "${contact.name}": no email address`);
@@ -213,12 +254,12 @@ export async function POST(request: Request) {
                   },
                 },
                 // Data payload — read by the service worker notification click
-                // handler to open the correct tracking page.
+                // handler to open the correct (tokenized, no-login) track page.
                 data: {
                   alertId,
                   userId,
                   type: "sos",
-                  url: `/track/alert/${alertId}`,
+                  url: trackUrl,
                 },
                 // Web push (Chrome / Edge / Firefox on desktop).
                 webpush: {
@@ -231,10 +272,10 @@ export async function POST(request: Request) {
                     // tag groups alerts so a second push replaces the first
                     // rather than stacking multiple notifications.
                     tag: `sos-${alertId}`,
-                    data: { url: `/track/alert/${alertId}` },
+                    data: { url: trackUrl },
                   },
                   fcmOptions: {
-                    link: `/track/alert/${alertId}`,
+                    link: trackUrl,
                   },
                 },
               });
