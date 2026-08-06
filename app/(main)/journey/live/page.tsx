@@ -15,10 +15,9 @@ import {
 } from "@/components/primitives";
 import type { Alert, Trip, TripLocation } from "@/lib/types";
 
-const STALE_AFTER_MS = 120_000;
-const LIVE_AFTER_MS = 45_000;
 const MIN_INSERT_GAP_MS = 8_000;
 const MIN_INSERT_DISTANCE_M = 15;
+const STOPPED_THRESHOLD_MS = 60_000; // 60 s
 
 type GpsState = { lat: number; lng: number; at: string } | null;
 
@@ -32,6 +31,50 @@ function haversine(a: GpsState, b: GpsState): number {
     Math.sin(dLat / 2) ** 2 +
     Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat)) * Math.sin(dLng / 2) ** 2;
   return 2 * R * Math.asin(Math.sqrt(s));
+}
+
+/** Speed categories for the telemetry badge. */
+interface SpeedBadge {
+  cls: string;
+  txt: string;
+  color: string;
+  bg: string;
+}
+
+function classifySpeed(kmh: number | null): SpeedBadge | null {
+  if (kmh === null) return null;
+  if (kmh <= 2) return { cls: "stopped", txt: "Stationary", color: "#A0A0A0", bg: "#F0F0F0" };
+  if (kmh <= 7) return { cls: "walking", txt: `⚡ ${kmh.toFixed(1)} km/h — Walking`, color: "#388E3C", bg: "#E8F5E9" };
+  if (kmh <= 15) return { cls: "active", txt: `⚡ ${kmh.toFixed(1)} km/h — Cycling / Running`, color: "#F57C00", bg: "#FFF3E0" };
+  return { cls: "vehicle", txt: `⚡ ${kmh.toFixed(1)} km/h — In Vehicle / Bus`, color: "#1565C0", bg: "#E3F2FD" };
+}
+
+/** Threat banner driven by speed + stop duration. */
+function threatBanner(speedKmh: number | null, stoppedMs: number | null): string | null {
+  if (speedKmh === null) return null;
+  if (speedKmh === 0 && stoppedMs !== null && stoppedMs > STOPPED_THRESHOLD_MS)
+    return "⚠️ Caution: Movement stopped for over 60s in an unlit section. Checking in…";
+  if (speedKmh > 15) return "In transit. Sharing real-time route telemetry with Safety Circle.";
+  return "On schedule. Bright route ahead.";
+}
+
+/** Compute km/h from two GPS points and a time delta (ms). Returns null when inputs are invalid. */
+function speedFromPoints(a: GpsState, b: GpsState, deltaMs: number): number | null {
+  if (!a || !b || deltaMs <= 0) return null;
+  const distM = haversine(a, b);
+  return (distM / deltaMs) * 3600;
+}
+
+/** Remaining distance in km from current GPS to trip destination. */
+function remainingKm(current: GpsState, destLat: number | null, destLng: number | null): number | null {
+  if (!current || destLat == null || destLng == null) return null;
+  return haversine(current, { lat: destLat, lng: destLng, at: "" }) / 1000;
+}
+
+/** Dynamic ETA in minutes based on current speed and remaining distance. */
+function dynamicEta(speedKmh: number | null, remKm: number | null): number | null {
+  if (speedKmh == null || remKm == null || remKm <= 0 || speedKmh <= 0.1) return null;
+  return Math.round((remKm / speedKmh) * 60);
 }
 
 /** Normalize a lat/lng trail into map-box pixel coordinates (SVG space). */
@@ -61,15 +104,6 @@ function trailToSvg(trail: TripLocation[], w: number, h: number) {
   };
 }
 
-function useNow(intervalMs = 5000) {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), intervalMs);
-    return () => clearInterval(t);
-  }, [intervalMs]);
-  return now;
-}
-
 function LiveScreen() {
   const router = useRouter();
   const toast = useToast();
@@ -86,8 +120,22 @@ function LiveScreen() {
   const [choiceOpen, setChoiceOpen] = useState(false);
   const [checkInOpen, setCheckInOpen] = useState(false);
 
+  // ── Telemetry state (Feature 1) ──────────────────────────
+  const [speedKmh, setSpeedKmh] = useState<number | null>(null);
+
+  // ── Demo mode state (Feature 2) ──────────────────────────
+  const [demoMode, setDemoMode] = useState(false);
+  const [demoSpeed, setDemoSpeed] = useState<number | null>(null);
+  const [demoOpen, setDemoOpen] = useState(false);
+
+  // ── Threat banner state (Feature 3) ──────────────────────
+  const [stoppedSince, setStoppedSince] = useState<number | null>(null);
+  const [bannerMsg, setBannerMsg] = useState<string | null>(null);
+
   const watchId = useRef<number | null>(null);
   const lastInsert = useRef<{ at: number; pos: GpsState }>({ at: 0, pos: null });
+  const prevGpsRef = useRef<GpsState>(null);
+  const prevGpsAtRef = useRef<number>(0);
 
   useFcmRegistration();
 
@@ -168,6 +216,26 @@ function LiveScreen() {
     const insertPosition = (pos: GeolocationPosition) => {
       const point = { lat: pos.coords.latitude, lng: pos.coords.longitude, at: new Date().toISOString() };
       setGps(point);
+
+      // ── Speed telemetry ──────────────────────────────
+      let kmh: number | null = null;
+      if (pos.coords.speed != null && pos.coords.speed >= 0) {
+        kmh = pos.coords.speed * 3.6; // m/s → km/h
+      } else {
+        const prev = prevGpsRef.current;
+        const prevAt = prevGpsAtRef.current;
+        if (prev) {
+          const deltaMs = Date.now() - prevAt;
+          if (deltaMs > 0) {
+            kmh = speedFromPoints(prev, point, deltaMs);
+          }
+        }
+      }
+      setSpeedKmh(kmh);
+      prevGpsRef.current = point;
+      prevGpsAtRef.current = Date.now();
+
+      // ── Trail insert (unchanged) ────────────────────
       const gap = Date.now() - lastInsert.current.at;
       const dist = haversine(lastInsert.current.pos, point);
       if (gap < MIN_INSERT_GAP_MS && dist < MIN_INSERT_DISTANCE_M) return;
@@ -196,28 +264,42 @@ function LiveScreen() {
     };
   }, [tripId, supabase]);
 
-  /* ── Staleness from the REAL last recorded_at, like the prototype's badge ── */
-  const now = useNow(5000);
-  const lastFixAt = useMemo(() => {
-    const real = trail[trail.length - 1]?.recorded_at;
-    if (real) return new Date(real).getTime();
-    return gps ? new Date(gps.at).getTime() : null;
-  }, [trail, gps]);
+  /* ── Threat banner (Feature 3): reacts to speed + stop duration ── */
+  useEffect(() => {
+    const effectiveKmh = demoMode && demoSpeed != null ? demoSpeed : speedKmh;
+    if (effectiveKmh === null) { setBannerMsg(null); setStoppedSince(null); return; }
 
-  const ageMs = lastFixAt === null ? Infinity : now - lastFixAt;
-  const badge =
-    ageMs < LIVE_AFTER_MS
-      ? { cls: "live", txt: "● GPS · Live now" }
-      : ageMs < STALE_AFTER_MS
-        ? { cls: "upd", txt: `● GPS · Updated ${Math.floor(ageMs / 60000)} min ago` }
-        : { cls: "stale", txt: `● GPS · Stale — last seen ${Math.floor(ageMs / 60000)} min ago` };
+    if (effectiveKmh === 0) {
+      setStoppedSince((prev) => (prev ?? Date.now()));
+    } else {
+      setStoppedSince(null);
+    }
 
+    const stoppedMs = stoppedSince !== null ? Date.now() - stoppedSince : null;
+    setBannerMsg(threatBanner(effectiveKmh, stoppedMs));
+  }, [speedKmh, demoMode, demoSpeed, stoppedSince]);
+
+  /* ── Dynamic ETA recalculation (Feature 1) ───────────────── */
+  const remKm = useMemo(
+    () => remainingKm(gps, trip?.destination_lat ?? null, trip?.destination_lng ?? null),
+    [gps, trip]
+  );
+  const effectiveSpeedKmh = demoMode && demoSpeed != null ? demoSpeed : speedKmh;
+  const dynamicEtaMin = useMemo(
+    () => dynamicEta(effectiveSpeedKmh, remKm),
+    [effectiveSpeedKmh, remKm]
+  );
   const activeAlert = alerts.find((a) => a.status !== "resolved");
-  const remainingMin = trip
+  const baseEtaMin = trip
     ? Math.max(0, Math.round((new Date(trip.expected_arrival_at).getTime() - Date.now()) / 60000))
     : null;
+  const remainingMin = dynamicEtaMin ?? baseEtaMin;
+
+  const speedBadge = classifySpeed(effectiveSpeedKmh);
 
   const svg = useMemo(() => trailToSvg(trail, 300, 240), [trail]);
+
+  /* ── Actions ── */
 
   /* ── Actions ── */
   const keepEye = useCallback(async () => {
@@ -294,43 +376,66 @@ function LiveScreen() {
         </button>
       </div>
 
-      <div className="map">
-        <svg
-          viewBox="0 0 300 240"
-          preserveAspectRatio="none"
-          className="absolute inset-0 h-full w-full"
-        >
-          {trail.length > 1 && (
-            <polyline
-              points={svg.pts}
-              fill="none"
-              stroke="var(--primary)"
-              strokeWidth="4"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeOpacity="0.75"
-            />
-          )}
-          {trail.length >= 2 && svg.start && (
-            <circle cx={svg.start.x} cy={svg.start.y} r="7" fill="var(--card)" stroke="var(--primary)" strokeWidth="3" />
-          )}
-          {trail.length >= 1 && svg.end && (
-            <circle cx={svg.end.x} cy={svg.end.y} r="9" fill="var(--accent)" stroke="var(--card)" strokeWidth="3" />
-          )}
-        </svg>
-        <div className={`mapbadge ${badge.cls}`}>{badge.txt}</div>
-        <div className="livebar">
-          <div>
-            <b>{gpsError ? "Location unavailable" : "All good"}</b>
-            <br />
-            <small className="text-muted">
-              {trip.destination_text}
-              {remainingMin !== null && ` · ${remainingMin} min remaining`}
-            </small>
-          </div>
-          <Tag>{trip.transit_mode}</Tag>
-        </div>
-      </div>
+       <div className="map">
+         <svg
+           viewBox="0 0 300 240"
+           preserveAspectRatio="none"
+           className="absolute inset-0 h-full w-full"
+         >
+           {trail.length > 1 && (
+             <polyline
+               points={svg.pts}
+               fill="none"
+               stroke="var(--primary)"
+               strokeWidth="4"
+               strokeLinecap="round"
+               strokeLinejoin="round"
+               strokeOpacity="0.75"
+             />
+           )}
+           {trail.length >= 2 && svg.start && (
+             <circle cx={svg.start.x} cy={svg.start.y} r="7" fill="var(--card)" stroke="var(--primary)" strokeWidth="3" />
+           )}
+           {trail.length >= 1 && svg.end && (
+             <circle cx={svg.end.x} cy={svg.end.y} r="9" fill="var(--accent)" stroke="var(--card)" strokeWidth="3" />
+           )}
+         </svg>
+
+         {/* ── Live speed telemetry badge ─────────────────── */}
+         {speedBadge && (
+           <div
+             className="mapbadge"
+             style={{ background: speedBadge.bg, color: speedBadge.color, border: `1px solid ${speedBadge.color}33` }}
+           >
+             {speedBadge.txt}
+           </div>
+         )}
+
+         <div className="livebar">
+           <div>
+             <b>{gpsError ? "Location unavailable" : "All good"}</b>
+             <br />
+             <small className="text-muted">
+               {trip.destination_text}
+               {remainingMin !== null && ` · ${remainingMin} min remaining`}
+             </small>
+           </div>
+           <Tag>{trip.transit_mode}</Tag>
+         </div>
+       </div>
+
+       {/* ── Threat / alert banner (Feature 3) ──────────── */}
+       {bannerMsg && (
+         <div
+           className="mt-3 rounded-card border border-line bg-card p-3 text-sm leading-[1.5]"
+           style={{
+             borderColor: bannerMsg.startsWith("⚠") ? "#E53E3E44" : bannerMsg.startsWith("In transit") ? "#1565C044" : "#388E3C44",
+             background: bannerMsg.startsWith("⚠") ? "#FDECEA" : bannerMsg.startsWith("In transit") ? "#E3F2FD" : "#E8F5E9",
+           }}
+         >
+           {bannerMsg}
+         </div>
+       )}
 
       <Card className="mt-3">
         <div className="flex items-center justify-between">
@@ -394,10 +499,88 @@ function LiveScreen() {
         <SecondaryButton className="mt-2.5 w-full" onClick={() => { setCheckInOpen(false); setChoiceOpen(true); }}>
           Something feels off
         </SecondaryButton>
-      </Sheet>
-    </div>
-  );
-}
+       </Sheet>
+
+       {/* ── Demo Controls floating button (Feature 2) ── */}
+       <button
+         type="button"
+         aria-label="Demo controls"
+         onClick={() => setDemoOpen(true)}
+         className="fixed bottom-6 right-6 z-50 grid h-[46px] w-[46px] place-items-center rounded-full bg-card shadow-card text-lg"
+         style={{ opacity: 0.7 }}
+       >
+         🎭
+       </button>
+
+       <Sheet open={demoOpen} onClose={() => setDemoOpen(false)}>
+         <div className="illus">🎭</div>
+         <div className="eyebrow">Demo Controls</div>
+         <h2 className="font-display mt-1.5 text-xl">Judge Simulation</h2>
+         <p className="mb-4 mt-2 text-sm leading-[1.6] text-muted">
+           Override live GPS speed to demo Sentinel&apos;s reactivity for judges.
+           Toggle a preset below — the speed badge, ETA, and threat banner update instantly.
+         </p>
+
+         <div className="mb-3 flex items-center justify-between">
+           <b className="text-sm">Mode</b>
+           <button
+             type="button"
+             onClick={() => { setDemoMode(false); setDemoSpeed(null); }}
+             className={`rounded-[20px] px-3 py-1.5 text-xs font-bold ${demoMode ? "bg-line text-muted" : "bg-primary2 text-primary"}`}
+           >
+             {demoMode ? "Demo Active" : "Real GPS"}
+           </button>
+         </div>
+
+         {demoMode && (
+           <div className="space-y-2">
+             <p className="text-xs text-muted">Quick presets — tap to simulate:</p>
+             <button
+               type="button"
+               onClick={() => setDemoSpeed(4.5)}
+               className="w-full rounded-[12px] border border-line bg-card px-3 py-3 text-left text-sm"
+             >
+               🚶 Walking Pace — <b>4.5 km/h</b>
+             </button>
+             <button
+               type="button"
+               onClick={() => setDemoSpeed(0)}
+               className="w-full rounded-[12px] border border-line bg-card px-3 py-3 text-left text-sm"
+             >
+               🛑 Sudden Stop — <b>0 km/h</b>
+             </button>
+             <button
+               type="button"
+               onClick={() => setDemoSpeed(32)}
+               className="w-full rounded-[12px] border border-line bg-card px-3 py-3 text-left text-sm"
+             >
+               🚗 In Bus / Cab — <b>32 km/h</b>
+             </button>
+             {demoSpeed != null && (
+               <button
+                 type="button"
+                 onClick={() => setDemoSpeed(null)}
+                 className="w-full rounded-[12px] border border-line bg-card px-3 py-2 text-xs text-muted"
+               >
+                 Clear demo speed — back to GPS
+               </button>
+             )}
+           </div>
+         )}
+
+         {!demoMode && (
+           <button
+             type="button"
+             onClick={() => setDemoMode(true)}
+             className="mt-2 w-full rounded-[12px] bg-primary2 px-3 py-3 text-sm font-bold text-primary"
+           >
+             Enter Demo Mode
+           </button>
+         )}
+       </Sheet>
+     </div>
+   );
+ }
 
 export default function LivePage() {
   return (
