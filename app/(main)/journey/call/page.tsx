@@ -15,8 +15,10 @@ import { useToast } from "@/components/toast";
 
 const OFFICER_NAME = "Inspector V. Sharma";
 const OFFICER_ROLE = "UP Police 112 Dispatch Control Room";
-const OFFICER_AVATAR =
-  "https://images.unsplash.com/photo-1582750433449-648ed127bb54?auto=format&fit=crop&q=80&w=600";
+const OFFICER_AVATAR = "https://share.google/EWRlZWzaHnpRNQPB7";
+/** Official Emblem of India badge — used if the custom portrait can't load. */
+const OFFICER_AVATAR_FALLBACK =
+  "https://upload.wikimedia.org/wikipedia/commons/thumb/5/55/Emblem_of_India.svg/300px-Emblem_of_India.svg.png";
 
 const FALLBACK_GPS = { lat: 28.4672, lng: 77.4956, place: "Knowledge Park III" };
 
@@ -73,6 +75,20 @@ function fmtLng(lng: number): string {
   return `${Math.abs(lng).toFixed(4)}° ${lng >= 0 ? "E" : "W"}`;
 }
 
+/**
+ * Inspector portrait. Falls back to the official Emblem of India badge if the
+ * custom share URL can't load (auth-gated, offline, etc.) — never a stock photo.
+ */
+function InspectorAvatar({ alt }: { alt: string }) {
+  const [src, setSrc] = useState(OFFICER_AVATAR);
+  const onError = () =>
+    setSrc((prev) => (prev === OFFICER_AVATAR_FALLBACK ? prev : OFFICER_AVATAR_FALLBACK));
+  return (
+    /* eslint-disable-next-line @next/next/no-img-element -- remote portrait */
+    <img src={src} alt={alt} onError={onError} />
+  );
+}
+
 export default function FakeCallPage() {
   const router = useRouter();
   const toast = useToast();
@@ -82,7 +98,7 @@ export default function FakeCallPage() {
   const [camState, setCamState] = useState<"idle" | "live" | "denied">("idle");
   const [gps, setGps] = useState<GpsStamp>(FALLBACK_GPS);
 
-  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const webcamRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const timersRef = useRef<number[]>([]);
   const gpsWatchRef = useRef<number | null>(null);
@@ -124,10 +140,11 @@ export default function FakeCallPage() {
         audio: false,
       });
       streamRef.current = stream;
-      const video = videoRef.current;
-      if (video) {
-        video.srcObject = stream;
-        await video.play().catch(() => {});
+      if (webcamRef.current) {
+        webcamRef.current.srcObject = stream;
+        webcamRef.current.onloadedmetadata = () => {
+          webcamRef.current?.play().catch((e) => console.error("Play error:", e));
+        };
       }
       setCamState("live");
     } catch {
@@ -138,7 +155,10 @@ export default function FakeCallPage() {
   const stopEverything = useCallback(() => {
     streamRef.current?.getTracks().forEach((track) => track.stop());
     streamRef.current = null;
-    if (videoRef.current) videoRef.current.srcObject = null;
+    if (webcamRef.current) {
+      webcamRef.current.onloadedmetadata = null;
+      webcamRef.current.srcObject = null;
+    }
     if (typeof window !== "undefined" && "speechSynthesis" in window) {
       window.speechSynthesis.cancel();
     }
@@ -198,8 +218,7 @@ export default function FakeCallPage() {
         <div className="flex grow flex-col items-center justify-center px-6">
           <div className="police-avatar">
             <span className="pulse-ring" />
-            {/* eslint-disable-next-line @next/next/no-img-element -- remote demo portrait */}
-            <img src={OFFICER_AVATAR} alt={OFFICER_NAME} />
+            <InspectorAvatar alt={OFFICER_NAME} />
           </div>
           <h1 className="police-name">{OFFICER_NAME}</h1>
           <p className="police-role">{OFFICER_ROLE}</p>
@@ -247,19 +266,29 @@ export default function FakeCallPage() {
         {/* ── Front camera evidence stream (PiP) ── */}
         <div className="pip-wrap">
           {camState === "live" ? (
-            <video ref={videoRef} autoPlay playsInline muted />
-          ) : (
-            <div className="pip-fallback">
-              📷 {camState === "denied" ? "Camera unavailable" : "Starting camera…"}
+            <video
+              ref={webcamRef}
+              autoPlay
+              playsInline
+              muted
+              className="h-full w-full -scale-x-100 object-cover"
+            />
+          ) : camState === "denied" ? (
+            <div className="pip-blocked">
+              ⚠️ Camera Access Blocked.
+              <span>Click the camera icon in your address bar to enable video feed.</span>
             </div>
+          ) : (
+            <div className="pip-fallback">📷 Starting camera…</div>
           )}
-          <div className="pip-label">EVIDENCE STREAM TRANSMITTED</div>
+          <div className={`pip-label${camState === "live" ? "" : " off"}`}>
+            {camState === "live" ? "EVIDENCE STREAM TRANSMITTED" : "VIDEO FEED BLOCKED"}
+          </div>
         </div>
 
         <div className="police-avatar">
           <span className="pulse-ring" />
-          {/* eslint-disable-next-line @next/next/no-img-element -- remote demo portrait */}
-          <img src={OFFICER_AVATAR} alt={OFFICER_NAME} />
+          <InspectorAvatar alt={OFFICER_NAME} />
         </div>
         <h1 className="police-name">{OFFICER_NAME}</h1>
         <p className="police-role">{OFFICER_ROLE}</p>

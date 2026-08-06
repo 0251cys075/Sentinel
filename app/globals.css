@@ -484,7 +484,7 @@ button {
   width: 100%;
   aspect-ratio: 3 / 4;
   object-fit: cover;
-  transform: scaleX(-1); /* mirror like a selfie preview */
+  /* mirrored via the Tailwind -scale-x-100 utility on the element */
   background: #000;
 }
 
@@ -498,6 +498,34 @@ button {
   background: #0a0f14;
 }
 
+.pip-blocked {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  justify-content: center;
+  width: 100%;
+  aspect-ratio: 3 / 4;
+  padding: 8px 7px;
+  font-size: 9.5px;
+  font-weight: 700;
+  line-height: 1.45;
+  text-align: center;
+  color: #fecaca;
+  background:
+    repeating-linear-gradient(
+      -45deg,
+      rgba(239, 68, 68, 0.14) 0 8px,
+      rgba(127, 29, 29, 0.22) 8px 16px
+    ),
+    #1f0a0a;
+  border-top: 2px solid #ef4444;
+}
+.pip-blocked span {
+  font-size: 8.5px;
+  font-weight: 500;
+  color: rgba(254, 202, 202, 0.75);
+}
+
 .pip-label {
   font-size: 9px;
   font-weight: 800;
@@ -507,6 +535,11 @@ button {
   color: #052e16;
   background: #4ade80;
   padding: 4px 2px;
+}
+
+.pip-label.off {
+  color: #fff;
+  background: #ef4444;
 }
 
 /* ─── SOS screen ─── */
