@@ -31,27 +31,42 @@ function SosScreen() {
 
   /**
    * Pick the trip the SOS alert attaches to: the one passed via ?trip=,
-   * else the user's most recent active trip, else their most recent trip.
+   * else the user's most recent trip (any status). If the user has no
+   * trips at all, create a placeholder "Emergency" trip so the alert
+   * always has a trip_id to reference.
    */
   const resolveTripId = useCallback(
-    async (userId: string): Promise<string | null> => {
+    async (userId: string): Promise<string> => {
       if (tripIdParam) return tripIdParam;
       const supabase = getSupabaseBrowser();
-      const { data: active } = await supabase
-        .from("trips")
-        .select("id")
-        .eq("user_id", userId)
-        .eq("status", "active")
-        .order("started_at", { ascending: false })
-        .limit(1);
-      if (active && active.length) return active[0].id;
       const { data: recent } = await supabase
         .from("trips")
         .select("id")
         .eq("user_id", userId)
         .order("started_at", { ascending: false })
         .limit(1);
-      return recent && recent.length ? recent[0].id : null;
+      if (recent && recent.length) return recent[0].id;
+
+      const now = new Date().toISOString();
+      const { data: placeholder, error: tripError } = await supabase
+        .from("trips")
+        .insert({
+          user_id: userId,
+          destination_text: "Emergency",
+          transit_mode: "Walk",
+          eta_minutes: 0,
+          buffer_minutes: 0,
+          status: "escalated",
+          started_at: now,
+          expected_arrival_at: now,
+        })
+        .select("id")
+        .single();
+      if (tripError) {
+        console.error("Placeholder trip insert failed:", tripError);
+        throw tripError;
+      }
+      return placeholder.id;
     },
     [tripIdParam]
   );
@@ -70,19 +85,28 @@ function SosScreen() {
 
       const tripId = await resolveTripId(user.id);
       const { error } = await supabase.from("alerts").insert({
-        trip_id: tripId ?? null,
+        trip_id: tripId,
         user_id: user.id,
         type: "sos",
         status: "sent",
+        created_at: new Date().toISOString(),
       });
-      if (error) throw error;
+      if (error) {
+        console.error("SOS alert insert failed:", error);
+        throw error;
+      }
 
       notifySosSmsDemo();
       return true;
     } catch (err) {
       doneRef.current = false;
-      toast(err instanceof Error ? err.message : "Could not send SOS");
       setSending(false);
+      console.error("SOS confirm failed:", err);
+      const message =
+        err instanceof Error
+          ? err.message
+          : (err as { message?: string } | null)?.message ?? "unknown error";
+      toast("SOS failed: " + message);
       return false;
     }
   }, [resolveTripId, toast]);
@@ -96,15 +120,12 @@ function SosScreen() {
     return () => clearInterval(t);
   }, []);
 
-  /* Auto-fire the SOS the instant the countdown hits 00, then head home. */
+  /* Auto-fire the SOS the instant the countdown hits 00. */
   useEffect(() => {
     if (left > 0 || confirmed) return;
     void (async () => {
       const ok = await confirmSos();
-      if (ok) {
-        toast("SOS sent — your contacts have been notified.");
-        router.push("/");
-      }
+      if (ok) setConfirmed(true);
     })();
     // Runs once per `left` transition; retries go through the button.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -130,12 +151,11 @@ function SosScreen() {
           <div>✓</div>
         </div>
         <div className="eyebrow !text-primary">SOS sent</div>
-        <h1 className="font-display mt-2 text-[30px] leading-[1.15]">
+        <h1 className="font-display mt-2 text-[30px] font-bold leading-[1.15]">
           Help is on the way
         </h1>
         <p className="mt-3 leading-[1.6] text-muted">
-          Your trusted circle has been alerted with your live location and
-          journey details.
+          Your trusted contacts have been notified with your location.
         </p>
         <button
           type="button"
