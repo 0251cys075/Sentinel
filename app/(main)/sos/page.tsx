@@ -3,6 +3,7 @@
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { getSupabaseBrowser } from "@/lib/supabase/client";
+import { notifySosSmsDemo } from "@/lib/sos";
 import { useToast } from "@/components/toast";
 import { Card } from "@/components/primitives";
 
@@ -12,12 +13,13 @@ function SosScreen() {
   const router = useRouter();
   const toast = useToast();
   const params = useSearchParams();
-  const tripId = params.get("trip") ?? "";
+  const tripIdParam = params.get("trip") ?? "";
 
   const [left, setLeft] = useState(SOS_COUNTDOWN_SECONDS);
   const [primaryContacts, setPrimaryContacts] = useState<string[]>([]);
   const [sending, setSending] = useState(false);
-  const sent = useRef(false);
+  const [confirmed, setConfirmed] = useState(false);
+  const doneRef = useRef(false);
 
   useEffect(() => {
     getSupabaseBrowser()
@@ -27,9 +29,37 @@ function SosScreen() {
       .then(({ data }) => setPrimaryContacts((data ?? []).map((c) => c.name)));
   }, []);
 
-  const send = useCallback(async () => {
-    if (sent.current) return;
-    sent.current = true;
+  /**
+   * Pick the trip the SOS alert attaches to: the one passed via ?trip=,
+   * else the user's most recent active trip, else their most recent trip.
+   */
+  const resolveTripId = useCallback(
+    async (userId: string): Promise<string | null> => {
+      if (tripIdParam) return tripIdParam;
+      const supabase = getSupabaseBrowser();
+      const { data: active } = await supabase
+        .from("trips")
+        .select("id")
+        .eq("user_id", userId)
+        .eq("status", "active")
+        .order("started_at", { ascending: false })
+        .limit(1);
+      if (active && active.length) return active[0].id;
+      const { data: recent } = await supabase
+        .from("trips")
+        .select("id")
+        .eq("user_id", userId)
+        .order("started_at", { ascending: false })
+        .limit(1);
+      return recent && recent.length ? recent[0].id : null;
+    },
+    [tripIdParam]
+  );
+
+  /** Insert the `sos` alert for the current user, then fire the demo notify. */
+  const confirmSos = useCallback(async (): Promise<boolean> => {
+    if (doneRef.current) return false;
+    doneRef.current = true;
     setSending(true);
     try {
       const supabase = getSupabaseBrowser();
@@ -38,42 +68,85 @@ function SosScreen() {
       } = await supabase.auth.getUser();
       if (!user) throw new Error("Not signed in");
 
+      const tripId = await resolveTripId(user.id);
       const { error } = await supabase.from("alerts").insert({
-        trip_id: tripId || null,
+        trip_id: tripId ?? null,
         user_id: user.id,
         type: "sos",
+        status: "sent",
       });
       if (error) throw error;
-      toast("SOS sent to your trusted circle");
-      router.push("/");
+
+      notifySosSmsDemo();
+      return true;
     } catch (err) {
-      sent.current = false;
+      doneRef.current = false;
       toast(err instanceof Error ? err.message : "Could not send SOS");
       setSending(false);
+      return false;
     }
-  }, [tripId, router, toast]);
+  }, [resolveTripId, toast]);
 
-  /* Auto-send when the countdown reaches zero, exactly like the prototype. */
+  /* Countdown — pure ticking, no side effects inside the state updater. */
   useEffect(() => {
+    if (doneRef.current) return;
     const t = setInterval(() => {
-      setLeft((prev) => {
-        if (prev <= 1) {
-          clearInterval(t);
-          void send();
-          return 0;
-        }
-        return prev - 1;
-      });
+      setLeft((prev) => Math.max(0, prev - 1));
     }, 1000);
     return () => clearInterval(t);
-  }, [send]);
+  }, []);
+
+  /* Auto-fire the SOS the instant the countdown hits 00, then head home. */
+  useEffect(() => {
+    if (left > 0 || confirmed) return;
+    void (async () => {
+      const ok = await confirmSos();
+      if (ok) {
+        toast("SOS sent — your contacts have been notified.");
+        router.push("/");
+      }
+    })();
+    // Runs once per `left` transition; retries go through the button.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [left]);
+
+  const sendNow = useCallback(async () => {
+    const ok = await confirmSos();
+    if (ok) setConfirmed(true);
+  }, [confirmSos]);
 
   const cancel = () => {
-    sent.current = true;
-    toast("SOS cancelled safely");
+    if (doneRef.current || sending) return;
+    doneRef.current = true;
+    toast("SOS cancelled — you're safe.");
     if (window.history.length > 1) window.history.back();
     else router.push("/");
   };
+
+  if (confirmed) {
+    return (
+      <div className="sos">
+        <div className="soscheck">
+          <div>✓</div>
+        </div>
+        <div className="eyebrow !text-primary">SOS sent</div>
+        <h1 className="font-display mt-2 text-[30px] leading-[1.15]">
+          Help is on the way
+        </h1>
+        <p className="mt-3 leading-[1.6] text-muted">
+          Your trusted circle has been alerted with your live location and
+          journey details.
+        </p>
+        <button
+          type="button"
+          onClick={() => router.push("/")}
+          className="mt-6 w-full rounded-[15px] bg-primary px-[18px] py-4 font-bold text-white shadow-[0_10px_24px_rgba(15,110,86,0.18)]"
+        >
+          Return home
+        </button>
+      </div>
+    );
+  }
 
   const names = primaryContacts.length
     ? primaryContacts.join(" and ")
@@ -111,9 +184,9 @@ function SosScreen() {
       </button>
       <button
         type="button"
-        onClick={send}
+        onClick={sendNow}
         disabled={sending}
-        className="mt-2.5 w-full rounded-[13px] bg-primary2 px-4 py-[13px] font-bold text-primary"
+        className="mt-2.5 w-full rounded-[13px] bg-primary2 px-4 py-[13px] font-bold text-primary disabled:opacity-60"
       >
         {sending ? "Sending…" : "Send SOS now"}
       </button>

@@ -346,6 +346,30 @@ button {
   box-shadow: 0 0 40px rgba(217, 74, 50, 0.35);
 }
 
+.soscheck {
+  width: 130px;
+  height: 130px;
+  border-radius: 50%;
+  margin: 0 auto 25px;
+  background: rgba(15, 110, 86, 0.12);
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(15, 110, 86, 0.35);
+}
+
+.soscheck div {
+  width: 84px;
+  height: 84px;
+  border-radius: 50%;
+  background: var(--primary);
+  color: #fff;
+  display: grid;
+  place-items: center;
+  font-family: var(--font-poppins), Poppins, sans-serif;
+  font-size: 42px;
+  box-shadow: 0 0 40px rgba(15, 110, 86, 0.35);
+}
+
 /* ─── Bottom sheet / nudge ─── */
 
 .sheet-backdrop {
