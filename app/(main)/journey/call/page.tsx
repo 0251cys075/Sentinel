@@ -1,12 +1,12 @@
 "use client";
 
 /**
- * "UP Police 112 Emergency Video Call" — a highly realistic deterrent call
- * used to unsettle a stalker/attacker. No real call is placed: Sentinel plays
- * a staged Hindi/English control-room script via the Web Speech API, streams
- * the device's front camera into a "live evidence" PiP window and shows a
- * believable 112 Dispatch UI. All hardware and speech is torn down when the
- * user declines or ends the call.
+ * "UP Police 112 Emergency Evidence Broadcast" — a high-deterrent, mobile
+ * optimized interface that makes an attacker believe the phone is live-streaming
+ * evidence to the UP Police 112 Control Room. No real call is placed: Sentinel
+ * requests the front camera immediately, plays an authoritative Hindi police
+ * script via the Web Speech API and shows a believable dispatch UI. All
+ * hardware and speech is torn down on End Call / unmount.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -30,7 +30,8 @@ const OFFICER_AVATAR_FALLBACK =
     `<svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 120 120"><rect width="120" height="120" rx="24" fill="#0b3a8f"/><path d="M60 14l34 12v26c0 22-14 40-34 52-20-12-34-30-34-52V26z" fill="#ff9800" stroke="#fff" stroke-width="3"/><circle cx="60" cy="46" r="11" fill="#0b3a8f"/><path d="M60 38l3.6 7 7.9 1.1-5.7 5.6 1.4 7.8-7.2-3.8-7.2 3.8 1.4-7.8-5.7-5.6 7.9-1.1z" fill="#ff9800"/><text x="60" y="98" text-anchor="middle" font-family="Arial, sans-serif" font-size="13" font-weight="bold" fill="#fff">UP POLICE</text></svg>`
   );
 
-const FALLBACK_GPS = { lat: 28.4672, lng: 77.4956, place: "Knowledge Park III" };
+/* Spec demo fix: NOIDA 28.4670° N, 77.4957° E (live GPS overrides when granted). */
+const FALLBACK_GPS = { lat: 28.467, lng: 77.4957, place: "Noida" };
 
 interface GpsStamp {
   lat: number;
@@ -38,11 +39,7 @@ interface GpsStamp {
   place: string | null;
 }
 
-/**
- * Multi-stage control-room audio, timed from the moment the call is accepted.
- * The opening line is spoken by speakPoliceOfficerVoice() at 2s; these follow-ups
- * run through speakLine().
- */
+/** Follow-up control-room audio (the opener runs through speakPoliceOfficerVoice). */
 type ScriptStage = { atMs: number; lines: string[] };
 const SCRIPT: ScriptStage[] = [
   {
@@ -55,7 +52,7 @@ const SCRIPT: ScriptStage[] = [
   {
     atMs: 25_000,
     lines: [
-      "PCR Van 104 aur Local Patrol Unit Knowledge Park se bas 60 seconds ki doori par hain.",
+      "PCR Van 104 aur Local Patrol Unit Noida se bas 60 seconds ki doori par hain.",
       "Suspect ki photo aur coordinates record ho rahe hain. Phone mat kaatna!",
     ],
   },
@@ -82,7 +79,7 @@ function speakLine(text: string, lang = "hi-IN") {
 }
 
 /**
- * Deep authoritative Indian MALE police voice — the call opener. Explicitly
+ * Deep authoritative Indian MALE police voice — the broadcast opener. Explicitly
  * avoids the browser's default TTS: targets Indian male voice profiles
  * (Google Hindi, Microsoft Hemant / Ravi, or hi-IN / en-IN) with a firm,
  * low-pitched delivery.
@@ -135,8 +132,9 @@ function fmtLng(lng: number): string {
 }
 
 /**
- * Officer portrait. Primary is the official Emblem of India badge; if even that
- * fails to load, the inline data-URI badge kicks in — never an external stock photo.
+ * Officer portrait. Primary is the official Emblem of India badge inside a
+ * golden ring; if even that fails, the inline data-URI badge kicks in —
+ * never an external stock photo.
  */
 function InspectorAvatar({ alt }: { alt: string }) {
   const [src, setSrc] = useState(OFFICER_AVATAR);
@@ -157,7 +155,6 @@ export default function FakeCallPage() {
   const router = useRouter();
   const toast = useToast();
 
-  const [connected, setConnected] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const [camState, setCamState] = useState<"idle" | "live" | "denied">("idle");
   const [stream, setStream] = useState<MediaStream | null>(null);
@@ -166,35 +163,9 @@ export default function FakeCallPage() {
   const streamRef = useRef<MediaStream | null>(null);
   const timersRef = useRef<number[]>([]);
   const gpsWatchRef = useRef<number | null>(null);
-  const callStartedRef = useRef(false);
+  const speechKickedRef = useRef(false);
 
-  /* ── Live dynamic GPS stamp (falls back to the demo Knowledge Park fix) ── */
-  useEffect(() => {
-    if (!("geolocation" in navigator)) return;
-    gpsWatchRef.current = navigator.geolocation.watchPosition(
-      (pos) =>
-        setGps({
-          lat: pos.coords.latitude,
-          lng: pos.coords.longitude,
-          place: null, // real fix — drop the demo locality label
-        }),
-      () => {
-        /* keep demo coords on denial */
-      },
-      { enableHighAccuracy: true, timeout: 8_000, maximumAge: 5_000 }
-    );
-    return () => {
-      if (gpsWatchRef.current !== null) navigator.geolocation.clearWatch(gpsWatchRef.current);
-    };
-  }, []);
-
-  const schedule = useCallback((fn: () => void, ms: number) => {
-    timersRef.current.push(window.setTimeout(fn, ms));
-  }, []);
-
-  /* ── Request front camera IMMEDIATELY on page load ──
-     The stream lands in React state; the <video> callback ref binds it the
-     moment the active-call PiP mounts, so the feed is never a black box. */
+  /* ── Request front camera IMMEDIATELY on page load ── */
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -223,6 +194,58 @@ export default function FakeCallPage() {
     };
   }, []);
 
+  /* ── Live dynamic GPS stamp (falls back to the Noida demo fix) ── */
+  useEffect(() => {
+    if (!("geolocation" in navigator)) return;
+    gpsWatchRef.current = navigator.geolocation.watchPosition(
+      (pos) =>
+        setGps({
+          lat: pos.coords.latitude,
+          lng: pos.coords.longitude,
+          place: null, // real fix — drop the demo locality label
+        }),
+      () => {
+        /* keep demo coords on denial */
+      },
+      { enableHighAccuracy: true, timeout: 8_000, maximumAge: 5_000 }
+    );
+    return () => {
+      if (gpsWatchRef.current !== null) navigator.geolocation.clearWatch(gpsWatchRef.current);
+    };
+  }, []);
+
+  const schedule = useCallback((fn: () => void, ms: number) => {
+    timersRef.current.push(window.setTimeout(fn, ms));
+  }, []);
+
+  /* ── Kick off the police TTS broadcast + staged follow-ups ── */
+  const kickOffSpeech = useCallback(() => {
+    if (speechKickedRef.current) return;
+    speechKickedRef.current = true;
+    schedule(() => speakPoliceOfficerVoice(), 1_200);
+    SCRIPT.forEach((stage) => {
+      schedule(() => {
+        stage.lines.forEach((line, i) => schedule(() => speakLine(line), i * 600));
+      }, stage.atMs);
+    });
+  }, [schedule]);
+
+  useEffect(() => {
+    kickOffSpeech();
+    // Some browsers block speechSynthesis.speak() until the user has
+    // interacted — retry on the first pointer/touch/click if needed.
+    const retry = () => {
+      if (!speechKickedRef.current) kickOffSpeech();
+    };
+    window.addEventListener("pointerdown", retry, { once: true });
+    return () => {
+      window.removeEventListener("pointerdown", retry);
+      // Clear scheduled script timers (real teardown also clears them).
+      timersRef.current.forEach((t) => window.clearTimeout(t));
+      timersRef.current = [];
+    };
+  }, [kickOffSpeech]);
+
   const stopEverything = useCallback(() => {
     // 1. Stop every camera track (kills the red camera LED too).
     streamRef.current?.getTracks().forEach((track) => track.stop());
@@ -238,153 +261,119 @@ export default function FakeCallPage() {
     timersRef.current = [];
   }, []);
 
-  /* ── Accept: connect the staged 112 audio script (camera already live) ── */
-  const startCall = useCallback(() => {
-    if (callStartedRef.current) return;
-    callStartedRef.current = true;
-    setConnected(true);
-
-    schedule(() => speakPoliceOfficerVoice(), 2_000);
-    SCRIPT.forEach((stage) => {
-      schedule(() => {
-        stage.lines.forEach((line, i) => schedule(() => speakLine(line), i * 600));
-      }, stage.atMs);
-    });
-  }, [schedule]);
-
-  /* ── Decline / End: hard cleanup → dashboard with success toast ── */
+  /* ── End broadcast: hard cleanup → dashboard with success toast ── */
   const endCall = useCallback(() => {
     stopEverything();
-    toast("Call ended — you're safe. Sentinel is watching.");
+    toast("Broadcast ended — you're safe. Sentinel is watching.");
     router.push("/");
   }, [stopEverything, router, toast]);
 
   // Full hardware + audio teardown if the route unmounts (back nav, etc.).
   useEffect(() => () => stopEverything(), [stopEverything]);
 
-  /* ── Active call MM:SS timer ── */
+  /* ── Live MM:SS session timer ── */
   useEffect(() => {
-    if (!connected) return;
     const t = window.setInterval(() => setElapsed((e) => e + 1), 1000);
     return () => window.clearInterval(t);
-  }, [connected]);
+  }, []);
 
   const mm = String(Math.floor(elapsed / 60)).padStart(2, "0");
   const ss = String(elapsed % 60).padStart(2, "0");
   const gpsText = `GPS LOCKED • ${fmtLat(gps.lat)}, ${fmtLng(gps.lng)}${
-    gps.place ? ` (${gps.place})` : ""
-  }`;
+    gps.place ? ` • ${gps.place}` : ""
+  } • NOIDA PATROL UNIT DISPATCHED`;
 
-  /* ── Incoming call phase ─────────────────────────────────────── */
-  if (!connected) {
-    return (
-      <div className="police-call">
-        <div className="flex w-full flex-col items-center gap-2.5 px-5 pt-4">
-          <div className="flex w-full items-center justify-between">
-            <span className="live-pill">🔴 LIVE BROADCAST TO 112 CONTROL ROOM</span>
-            <span className="secure-tag">🛡 ENCRYPTED</span>
-          </div>
-          <span className="gps-stamp">📡 {gpsText}</span>
-        </div>
-
-        <div className="flex grow flex-col items-center justify-center px-6">
-          <div className="police-avatar">
-            <span className="pulse-ring" />
-            <InspectorAvatar alt={OFFICER_NAME} />
-          </div>
-          <h1 className="police-name">{OFFICER_NAME}</h1>
-          <p className="police-role">{OFFICER_ROLE}</p>
-          <span className="secure-tag">📹 Incoming Secure Video Call</span>
-        </div>
-
-        <div className="flex w-full items-center justify-around pb-[28px]">
-          <div className="text-center">
-            <button type="button" aria-label="Decline call" onClick={endCall} className="callaction end">
-              ✕
-            </button>
-            <small className="mt-1.5 block text-[11px] text-white/60">Decline</small>
-          </div>
-          <div className="text-center">
-            <button
-              type="button"
-              aria-label="Accept call"
-              onClick={startCall}
-              className="callaction accept"
-            >
-              📹
-            </button>
-            <small className="mt-1.5 block text-[11px] text-white/60">Accept &amp; Start Video</small>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  /* ── Active call phase ───────────────────────────────────────── */
   return (
-    <div className="police-call">
-      <div className="flex w-full flex-col items-center gap-2.5 px-5 pt-4">
-        <div className="flex w-full items-center justify-between">
-          <span className="live-pill">🔴 LIVE</span>
-          <div className="call-timer" aria-label="Call duration">
+    <div className="fixed inset-0 z-50 flex select-none flex-col justify-between overflow-y-auto border-2 border-red-600 bg-slate-950 px-4 pb-24 pt-6 font-sans text-white animate-pulse shadow-[0_0_30px_rgba(220,38,38,0.5)]">
+      {/* ── Row 1: pills + digital timer ── */}
+      <div className="flex w-full items-center justify-between">
+        <div className="flex flex-col items-start gap-0.5">
+          <span className="rounded-full bg-red-600 px-2 py-0.5 text-[9px] font-bold tracking-wider uppercase">
+            🔴 LIVE BROADCAST
+          </span>
+          <span className="text-[8px] tracking-wider text-red-300 uppercase">
+            RED ALERT BROADCAST
+          </span>
+        </div>
+        <div className="flex flex-col items-center gap-0.5">
+          <span className="font-mono text-2xl font-bold text-emerald-400 tabular-nums">
             {mm}:{ss}
-          </div>
-          <span className="secure-tag">🛡 ENCRYPTED</span>
+          </span>
+          <span className="text-[8px] tracking-wider text-slate-400 uppercase">
+            SESSION LOG: SENTINEL PROTOCOL 112
+          </span>
         </div>
-        <span className="gps-stamp">📡 {gpsText}</span>
+        <div className="flex flex-col items-end gap-0.5">
+          <span className="rounded-full bg-teal-600 px-2 py-0.5 text-[9px] font-bold tracking-wider uppercase">
+            🛡️ ENCRYPTED
+          </span>
+          <span className="text-[8px] tracking-wider text-teal-300 uppercase">
+            ENCRYPTED UPLOAD TO CONTROL ROOM
+          </span>
+        </div>
       </div>
 
-      <div className="relative flex grow flex-col items-center justify-center px-6">
-        {/* ── Front camera evidence stream (self-attaching PiP node) ── */}
-        <div className="absolute top-16 right-4 z-20 h-44 w-32 overflow-hidden rounded-2xl border-2 border-emerald-500 bg-black shadow-2xl">
-          {camState === "live" ? (
-            <video
-              ref={(node) => {
-                if (node && stream) {
-                  node.srcObject = stream;
-                  node.play().catch(() => {});
-                }
-              }}
-              autoPlay
-              playsInline
-              muted
-              className="h-full w-full -scale-x-100 object-cover"
-            />
-          ) : camState === "denied" ? (
-            <div className="pip-blocked">
-              ⚠️ Camera Access Blocked.
-              <span>Click the camera icon in your address bar to enable video feed.</span>
-            </div>
-          ) : (
-            <div className="pip-fallback">📷 Starting camera…</div>
-          )}
-          <div
-            className={`absolute inset-x-0 bottom-0 py-0.5 text-center font-mono text-[9px] font-bold${
-              camState === "live" ? " bg-emerald-500 text-black" : " bg-red-500 text-white"
-            }`}
-          >
-            {camState === "live" ? "EVIDENCE STREAM TRANSMITTED" : "VIDEO FEED BLOCKED"}
-          </div>
+      {/* ── Row 2: GPS lock badge ── */}
+      <div className="my-1 flex justify-center">
+        <div className="rounded-lg border border-slate-700 bg-slate-900/90 px-3 py-1 text-center font-mono text-[10px]">
+          📡 {gpsText}
         </div>
-
-        <div className="police-avatar">
-          <span className="pulse-ring" />
-          <InspectorAvatar alt={OFFICER_NAME} />
-        </div>
-        <h1 className="police-name">{OFFICER_NAME}</h1>
-        <p className="police-role">{OFFICER_ROLE}</p>
-        <span className="secure-tag">🔒 Secure — suspect footage being recorded</span>
       </div>
 
-      <div className="w-full px-4 pb-4">
-        <div className="rounded-lg border border-red-500/40 bg-red-700/80 px-3 py-2 text-center font-mono text-[10.5px] font-bold tracking-wide text-white">
+      {/* ── Webcam evidence stream (self-attaching PiP, top-right) ── */}
+      <div className="relative my-2 ml-auto h-32 w-44 overflow-hidden rounded-xl border-2 border-red-500 bg-black shadow-2xl">
+        {camState === "live" ? (
+          <video
+            ref={(node) => {
+              if (node && stream) {
+                node.srcObject = stream;
+                node.play().catch(() => {});
+              }
+            }}
+            autoPlay
+            playsInline
+            muted
+            className="h-full w-full -scale-x-100 object-cover"
+          />
+        ) : camState === "denied" ? (
+          <div className="flex h-full w-full flex-col items-center justify-center gap-1 bg-black px-2 text-center text-[8.5px] leading-tight text-red-400">
+            <span>⚠️ Camera Access Blocked.</span>
+            <span className="text-white/50">
+              Click the camera icon in your address bar to enable video feed.
+            </span>
+          </div>
+        ) : (
+          <div className="flex h-full w-full items-center justify-center bg-black text-[9px] text-white/60">
+            📷 Starting camera…
+          </div>
+        )}
+        <div className="absolute top-1 right-1 animate-pulse rounded bg-red-600 px-1.5 py-0.5 font-mono text-[8px] font-bold text-white">
+          🔴 EVIDENCE LOGGING
+        </div>
+        <div className="absolute bottom-1 left-1 rounded bg-black/80 px-1 font-mono text-[8px] text-emerald-400">
+          FACIAL CAPTURE ACTIVE • GEOLOCATION LOGGED
+        </div>
+      </div>
+
+      {/* ── Officer card: metallic emblem badge ── */}
+      <div className="flex flex-col items-center gap-1.5 py-2">
+        <InspectorAvatar alt={OFFICER_NAME} />
+        <h1 className="text-lg font-bold tracking-wide">{OFFICER_NAME}</h1>
+        <p className="text-[11px] text-slate-300">{OFFICER_ROLE}</p>
+        <span className="text-[10px] text-teal-300">🔒 Secure — suspect footage being recorded</span>
+      </div>
+
+      {/* ── Bottom: dispatch banner + End Call (above app bottom nav) ── */}
+      <div className="flex flex-col gap-3">
+        <div className="rounded-lg border border-red-500/40 bg-red-700/80 px-3 py-2 text-center font-mono text-[10px] font-bold tracking-wide text-white">
           🔴 POLICE DISPATCH ACTIVE • SUSPECT EVIDENCE STREAMED TO CONTROL ROOM
         </div>
-      </div>
-
-      <div className="pb-[28px]">
-        <button type="button" onClick={endCall} className="endcall-btn">
-          ⏻ End Call
+        <button
+          type="button"
+          onClick={endCall}
+          className="w-full rounded-xl border border-red-400/40 bg-gradient-to-b from-red-600 to-red-700 py-3.5 text-sm font-bold tracking-widest uppercase shadow-lg shadow-red-600/30 active:scale-[0.98]"
+        >
+          ⏻ End Broadcast
         </button>
       </div>
     </div>
