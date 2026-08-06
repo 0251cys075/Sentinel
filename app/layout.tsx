@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Inter, Poppins } from "next/font/google";
 import { Providers } from "@/components/providers";
+import { FcmRegistration } from "@/components/fcm-registration";
 import "./globals.css";
 
 const inter = Inter({
@@ -42,7 +43,10 @@ export default function RootLayout({
       className={`${inter.variable} ${poppins.variable}`}
     >
       <body className="font-sans">
-        <Providers>{children}</Providers>
+        <Providers>
+          <FcmRegistration />
+          {children}
+        </Providers>
       </body>
     </html>
   );
