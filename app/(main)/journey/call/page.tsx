@@ -2,11 +2,11 @@
 
 /**
  * "UP Police 112 Emergency Video Call" — a highly realistic deterrent call
- * used to unsettle a stalker/attacker. No real call is placed: Sentinel
- * plays a staged Hindi/English control-room script via the Web Speech API,
- * streams the device's front camera into a "live evidence" PiP window and
- * shows a believable 112 Dispatch UI. All hardware and speech is torn down
- * when the user declines or ends the call.
+ * used to unsettle a stalker/attacker. No real call is placed: Sentinel plays
+ * a staged Hindi/English control-room script via the Web Speech API, streams
+ * the device's front camera into a "live evidence" PiP window and shows a
+ * believable 112 Dispatch UI. All hardware and speech is torn down when the
+ * user declines or ends the call.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -15,10 +15,20 @@ import { useToast } from "@/components/toast";
 
 const OFFICER_NAME = "Inspector V. Sharma";
 const OFFICER_ROLE = "UP Police 112 Dispatch Control Room";
-const OFFICER_AVATAR = "https://share.google/EWRlZWzaHnpRNQPB7";
-/** Official Emblem of India badge — used if the custom portrait can't load. */
-const OFFICER_AVATAR_FALLBACK =
+
+/** Official Emblem of India badge — the primary officer portrait. */
+const OFFICER_AVATAR =
   "https://upload.wikimedia.org/wikipedia/commons/thumb/5/55/Emblem_of_India.svg/300px-Emblem_of_India.svg.png";
+
+/**
+ * Inline UP Police badge (data URI) — the final safety net so a broken/failed
+ * <img> request can never fall back to an external stock photo.
+ */
+const OFFICER_AVATAR_FALLBACK =
+  "data:image/svg+xml;utf8," +
+  encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 120 120"><rect width="120" height="120" rx="24" fill="#0b3a8f"/><path d="M60 14l34 12v26c0 22-14 40-34 52-20-12-34-30-34-52V26z" fill="#ff9800" stroke="#fff" stroke-width="3"/><circle cx="60" cy="46" r="11" fill="#0b3a8f"/><path d="M60 38l3.6 7 7.9 1.1-5.7 5.6 1.4 7.8-7.2-3.8-7.2 3.8 1.4-7.8-5.7-5.6 7.9-1.1z" fill="#ff9800"/><text x="60" y="98" text-anchor="middle" font-family="Arial, sans-serif" font-size="13" font-weight="bold" fill="#fff">UP POLICE</text></svg>`
+  );
 
 const FALLBACK_GPS = { lat: 28.4672, lng: 77.4956, place: "Knowledge Park III" };
 
@@ -34,7 +44,7 @@ const SCRIPT: ScriptStage[] = [
   {
     atMs: 2_000,
     lines: [
-      "UP Police Control Room 112. Ma'am, aapki live location system par lock ho gayi hai. Kya aap safe hain?",
+      "UP Police Control Room 112. Ma'am, aapki live location system par lock ho gayi hai. PCR Van 104 Knowledge Park se 1 minute ke distance par hai. Suspect ki taraf camera point karein.",
     ],
   },
   {
@@ -76,8 +86,8 @@ function fmtLng(lng: number): string {
 }
 
 /**
- * Inspector portrait. Falls back to the official Emblem of India badge if the
- * custom share URL can't load (auth-gated, offline, etc.) — never a stock photo.
+ * Officer portrait. Primary is the official Emblem of India badge; if even that
+ * fails to load, the inline data-URI badge kicks in — never an external stock photo.
  */
 function InspectorAvatar({ alt }: { alt: string }) {
   const [src, setSrc] = useState(OFFICER_AVATAR);
@@ -98,7 +108,7 @@ export default function FakeCallPage() {
   const [camState, setCamState] = useState<"idle" | "live" | "denied">("idle");
   const [gps, setGps] = useState<GpsStamp>(FALLBACK_GPS);
 
-  const webcamRef = useRef<HTMLVideoElement | null>(null);
+  const selfieVideoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const timersRef = useRef<number[]>([]);
   const gpsWatchRef = useRef<number | null>(null);
@@ -140,10 +150,12 @@ export default function FakeCallPage() {
         audio: false,
       });
       streamRef.current = stream;
-      if (webcamRef.current) {
-        webcamRef.current.srcObject = stream;
-        webcamRef.current.onloadedmetadata = () => {
-          webcamRef.current?.play().catch((e) => console.error("Play error:", e));
+      if (selfieVideoRef.current) {
+        selfieVideoRef.current.srcObject = stream;
+        selfieVideoRef.current.onloadedmetadata = () => {
+          // Play inside onloadedmetadata so autoplay starts reliably
+          // (no silent browser block from a bare async play()).
+          selfieVideoRef.current?.play().catch((e) => console.error("Play error:", e));
         };
       }
       setCamState("live");
@@ -153,15 +165,19 @@ export default function FakeCallPage() {
   }, []);
 
   const stopEverything = useCallback(() => {
+    // 1. Stop every camera track (kills the red camera LED too).
     streamRef.current?.getTracks().forEach((track) => track.stop());
     streamRef.current = null;
-    if (webcamRef.current) {
-      webcamRef.current.onloadedmetadata = null;
-      webcamRef.current.srcObject = null;
+    // 2. Detach the stream from the <video> element.
+    if (selfieVideoRef.current) {
+      selfieVideoRef.current.onloadedmetadata = null;
+      selfieVideoRef.current.srcObject = null;
     }
+    // 3. Halt any queued/ongoing speech.
     if (typeof window !== "undefined" && "speechSynthesis" in window) {
       window.speechSynthesis.cancel();
     }
+    // 4. Clear every scheduled script/dialogue timer.
     timersRef.current.forEach((t) => window.clearTimeout(t));
     timersRef.current = [];
   }, []);
@@ -267,7 +283,7 @@ export default function FakeCallPage() {
         <div className="pip-wrap">
           {camState === "live" ? (
             <video
-              ref={webcamRef}
+              ref={selfieVideoRef}
               autoPlay
               playsInline
               muted
