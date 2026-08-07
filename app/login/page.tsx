@@ -8,38 +8,26 @@ import { useToast } from "@/components/toast";
 import { BrandMark, ThemeToggle } from "@/components/shell";
 import { Card, Field, PrimaryButton, TextInput } from "@/components/primitives";
 
-type Method = "email" | "phone";
 type Mode = "signin" | "signup";
-type EmailAuth = "password" | "magic";
 
 function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const toast = useToast();
 
-  const [method, setMethod] = useState<Method>("email");
   const [mode, setMode] = useState<Mode>("signin");
-  const [emailAuth, setEmailAuth] = useState<EmailAuth>("password");
   const [forgot, setForgot] = useState(false);
   const [email, setEmail] = useState("");
-  const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
   const [fullName, setFullName] = useState("");
   const [sent, setSent] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   const supabase = getSupabaseBrowser();
-  const origin =
-    typeof window !== "undefined" ? window.location.origin : "";
 
   function resetToggles() {
     setForgot(false);
     setSent(null);
-  }
-
-  function switchMethod(m: Method) {
-    setMethod(m);
-    resetToggles();
   }
 
   function switchMode(next: Mode) {
@@ -61,23 +49,6 @@ function LoginForm() {
       router.refresh();
     } catch (err) {
       toast(err instanceof Error ? err.message : "Something went wrong");
-      setBusy(false);
-    }
-  }
-
-  /** Phone OTP sign-in. */
-  async function signInWithPhoneOtp() {
-    setBusy(true);
-    try {
-      const { error } = await supabase.auth.signInWithOtp({
-        phone,
-        options: { data: { full_name: fullName || phone } },
-      });
-      if (error) throw error;
-      toast("OTP sent — enter it to complete sign-in");
-    } catch (err) {
-      toast(err instanceof Error ? err.message : "Something went wrong");
-    } finally {
       setBusy(false);
     }
   }
@@ -119,7 +90,7 @@ function LoginForm() {
     setBusy(true);
     try {
       const { error } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: `${origin}/auth/reset-password`,
+        redirectTo: `${window.location.origin}/auth/reset-password`,
       });
       if (error) throw error;
       setSent("Check your inbox — we've sent a reset link.");
@@ -132,60 +103,25 @@ function LoginForm() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (forgot) {
-      return sendForgot();
-    }
-    if (method === "email" && emailAuth === "magic") {
-      return sendMagicLink();
-    }
-    if (method === "email" && mode === "signin") {
-      return signInWithPassword();
-    }
-    if (method === "email" && mode === "signup") {
-      return signUp();
-    }
-    return signInWithPhoneOtp();
-  }
-
-  /** Magic Link / email OTP via signInWithOtp({ email }) — free, no SMS. */
-  async function sendMagicLink() {
-    setBusy(true);
-    try {
-      const { error } = await supabase.auth.signInWithOtp({
-        email,
-        options: { emailRedirectTo: `${origin}/auth/callback` },
-      });
-      if (error) throw error;
-      setSent("Check your inbox — your magic link is on its way.");
-    } catch (err) {
-      toast(err instanceof Error ? err.message : "Could not send magic link");
-    } finally {
-      setBusy(false);
-    }
+    if (forgot) return sendForgot();
+    if (mode === "signin") return signInWithPassword();
+    return signUp();
   }
 
   /**
-   * Google OAuth. Before this works, enable the Google provider in the
-   * Supabase dashboard: Authentication → Providers → Google. You must create
-   * an OAuth app in Google Cloud Console (https://console.cloud.google.com),
-   * add your app URL to the authorized JS origins, and the sign-in callback
-   * (https://<app>/auth/callback) to authorized redirect URIs, then paste the
-   * resulting Client ID and Client Secret into Supabase.
+   * Google OAuth. `window.location.origin` keeps the redirect target correct
+   * across environments — production (Vercel) and localhost — so the browser
+   * lands back on the app root after the OAuth dance.
    */
-  async function handleGoogle() {
-    setBusy(true);
-    try {
-      const { error } = await supabase.auth.signInWithOAuth({
-        provider: "google",
-        options: { redirectTo: `${origin}/auth/callback` },
-      });
-      if (error) throw error;
-    } catch (err) {
-      toast(err instanceof Error ? err.message : "Could not start Google sign-in");
-    } finally {
-      if (typeof window !== "undefined") setBusy(false);
-    }
-  }
+  const handleGoogleSignIn = async () => {
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: {
+        redirectTo: `${window.location.origin}/`,
+      },
+    });
+    if (error) console.error("Google Auth Error:", error.message);
+  };
 
   if (sent) {
     return (
@@ -231,38 +167,6 @@ function LoginForm() {
 
   return (
     <Card>
-      <div className="mb-4 flex rounded-[14px] border border-line bg-card p-1">
-        {(["email", "phone"] as const).map((m) => (
-          <button
-            key={m}
-            type="button"
-            onClick={() => switchMethod(m)}
-            className={`flex-1 rounded-[10px] py-2.5 text-sm font-bold capitalize ${
-              method === m ? "bg-primary2 text-primary" : "text-muted"
-            }`}
-          >
-            {m}
-          </button>
-        ))}
-      </div>
-
-      {method === "email" && mode === "signin" && (
-        <div className="mb-4 flex rounded-[14px] border border-line bg-card p-1">
-          {(["password", "magic"] as const).map((a) => (
-            <button
-              key={a}
-              type="button"
-              onClick={() => setEmailAuth(a)}
-              className={`flex-1 rounded-[10px] py-2.5 text-sm font-bold capitalize ${
-                emailAuth === a ? "bg-primary2 text-primary" : "text-muted"
-              }`}
-            >
-              {a}
-            </button>
-          ))}
-        </div>
-      )}
-
       <form onSubmit={handleSubmit}>
         {mode === "signup" && (
           <Field label="FULL NAME">
@@ -274,82 +178,43 @@ function LoginForm() {
           </Field>
         )}
 
-        {method === "email" ? (
-          <Field label="EMAIL">
-            <TextInput
-              value={email}
-              onChange={setEmail}
-              type="email"
-              placeholder="you@example.com"
-              autoFocus={!sent}
-            />
-          </Field>
-        ) : (
-          <Field label="PHONE NUMBER">
-            <TextInput
-              value={phone}
-              onChange={setPhone}
-              type="tel"
-              placeholder="+91 98765 43210"
-              autoFocus={!sent}
-            />
-          </Field>
-        )}
+        <Field label="EMAIL">
+          <TextInput
+            value={email}
+            onChange={setEmail}
+            type="email"
+            placeholder="you@example.com"
+            autoFocus={!sent}
+          />
+        </Field>
 
-        {method === "email" && emailAuth === "password" && mode === "signin" && (
-          <>
-            <Field label="PASSWORD">
-              <TextInput
-                value={password}
-                onChange={setPassword}
-                type="password"
-                placeholder="••••••••"
-              />
-            </Field>
-            <div className="-mt-2 mb-4 text-right">
-              <button
-                type="button"
-                onClick={() => setForgot(true)}
-                className="text-sm font-bold text-primary"
-              >
-                Forgot password?
-              </button>
-            </div>
-          </>
-        )}
+        <Field label="PASSWORD">
+          <TextInput
+            value={password}
+            onChange={setPassword}
+            type="password"
+            placeholder="••••••••"
+          />
+        </Field>
 
-        {method === "email" && emailAuth === "password" && mode === "signup" && (
-          <Field label="PASSWORD">
-            <TextInput
-              value={password}
-              onChange={setPassword}
-              type="password"
-              placeholder="••••••••"
-            />
-          </Field>
-        )}
-
-        {method === "email" && emailAuth === "magic" && mode === "signin" && (
-          <p className="mb-4 text-xs leading-relaxed text-muted">
-            We&apos;ll email you a one-click login link — no password needed.
-          </p>
-        )}
-
-        {method === "phone" && (
-          <p className="mb-4 text-xs leading-relaxed text-muted">
-            We&apos;ll text you a one-time code. Phone OTP must be enabled in
-            your Supabase Auth settings.
-          </p>
+        {mode === "signin" && (
+          <div className="-mt-2 mb-4 text-right">
+            <button
+              type="button"
+              onClick={() => setForgot(true)}
+              className="text-sm font-bold text-primary"
+            >
+              Forgot password?
+            </button>
+          </div>
         )}
 
         <PrimaryButton type="submit" disabled={busy}>
           {busy
             ? "Please wait…"
-            : method === "email" && emailAuth === "magic"
-              ? "Send magic link"
-              : method === "email" && mode === "signin"
-                ? "Sign in"
-                : "Create account"}
+            : mode === "signin"
+              ? "Sign in"
+              : "Create account"}
         </PrimaryButton>
       </form>
 
@@ -361,7 +226,7 @@ function LoginForm() {
 
       <button
         type="button"
-        onClick={handleGoogle}
+        onClick={handleGoogleSignIn}
         disabled={busy}
         className="flex w-full items-center justify-center gap-3 rounded-[15px] border border-line bg-white px-[18px] py-4 font-bold text-text shadow-card disabled:opacity-60"
       >
