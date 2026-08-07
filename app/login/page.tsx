@@ -64,15 +64,37 @@ function LoginForm() {
           data: { full_name: fullName || email.split("@")[0] },
         },
       });
-      if (error) throw error;
-      if (!data.session) {
-        toast("Account created — check your email to confirm");
-        setMode("signin");
+
+      if (error) {
+        toast(error.message);
         return;
       }
-      await linkContactAccountToUser();
-      router.push(searchParams.get("next") || "/");
-      router.refresh();
+
+      // If a session exists immediately, treat it as signed in and move on.
+      if (data.session) {
+        await linkContactAccountToUser();
+        router.push(searchParams.get("next") || "/");
+        router.refresh();
+        return;
+      }
+
+      // Email confirmation may be disabled in Supabase — attempt a quick
+      // password sign-in so the user isn't forced to wait for an email.
+      const { data: signInData, error: signInError } =
+        await supabase.auth.signInWithPassword({
+          email,
+          password,
+        });
+      if (signInData?.session) {
+        await linkContactAccountToUser();
+        router.push(searchParams.get("next") || "/");
+        router.refresh();
+      } else if (signInError) {
+        setMode("signin");
+        toast(
+          "Account created! Please check your email to confirm or sign in."
+        );
+      }
     } catch (err) {
       toast(err instanceof Error ? err.message : "Something went wrong");
     } finally {

@@ -54,8 +54,14 @@ export default async function HomePage({
   const contacts = contactsRes.data ?? [];
   const primaryCount = contacts.filter((c) => c.tier === "primary").length;
 
-  const firstName =
-    profile?.full_name?.split(" ")[0] || user!.email?.split("@")[0] || "there";
+  const displayName =
+    profile?.full_name ||
+    user?.user_metadata?.full_name ||
+    user?.user_metadata?.name ||
+    user?.email?.split("@")[0] ||
+    "User";
+
+  const firstName = displayName.split(" ")[0];
 
   return (
     <div>

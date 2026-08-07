@@ -9,6 +9,7 @@ import {
 } from "react";
 import type { User } from "@supabase/supabase-js";
 import { getSupabaseBrowser } from "@/lib/supabase/client";
+import { syncProfileName } from "@/lib/auth-links";
 
 const AuthContext = createContext<{ user: User | null }>({ user: null });
 
@@ -29,11 +30,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     supabase.auth.getSession().then(({ data: { session } }) => {
       setUser(session?.user ?? null);
+      if (session?.user) void syncProfileName(session.user);
     });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       (_event, session) => {
         setUser(session?.user ?? null);
+        if (session?.user) void syncProfileName(session.user);
       }
     );
 
