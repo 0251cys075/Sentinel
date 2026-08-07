@@ -131,15 +131,19 @@ function LoginForm() {
   }
 
   /**
-   * Google OAuth. `window.location.origin` keeps the redirect target correct
-   * across environments — production (Vercel) and localhost — so the browser
-   * lands back on the app root after the OAuth dance.
+   * Google OAuth. `window.location.origin` keeps the target correct across
+   * environments (Vercel / localhost). The return URL goes through
+   * /auth/callback — a public route — which exchanges the PKCE code and sets
+   * the session cookie on the server BEFORE redirecting to "/". Redirecting
+   * straight to "/" would fail, because "/" is a protected route: middleware
+   * would bounce the code-less request to /landing and the browser would
+   * never exchange the auth code.
    */
   const handleGoogleSignIn = async () => {
     const { error } = await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {
-        redirectTo: `${window.location.origin}/`,
+        redirectTo: `${window.location.origin}/auth/callback`,
       },
     });
     if (error) console.error("Google Auth Error:", error.message);
