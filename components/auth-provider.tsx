@@ -32,6 +32,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    // Clear error query params if present in URL so a broken OAuth callback
+    // (e.g. `?error=auth` or a stale Supabase error) can't wedge the user in
+    // a redirect loop on reload.
+    if (window.location.href.includes("error=")) {
+      window.history.replaceState(
+        {},
+        document.title,
+        window.location.pathname
+      );
+    }
+
     const supabase = getSupabaseBrowser();
 
     // 1. Fetch the current session — handles OAuth callback token parsing.

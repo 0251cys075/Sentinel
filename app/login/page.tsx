@@ -132,18 +132,24 @@ function LoginForm() {
 
   /**
    * Google OAuth. `window.location.origin` keeps the target correct across
-   * environments (Vercel / localhost). The return URL goes through
-   * /auth/callback — a public route — which exchanges the PKCE code and sets
-   * the session cookie on the server BEFORE redirecting to "/". Redirecting
-   * straight to "/" would fail, because "/" is a protected route: middleware
-   * would bounce the code-less request to /landing and the browser would
-   * never exchange the auth code.
+   * environments (Vercel / localhost). The return URL is the site root — the
+   * middleware (`middleware.ts`) detects the PKCE `?code=` on the way in,
+   * exchanges it server-side and sets the session cookies BEFORE the
+   * protected-page guard runs, so the user lands directly on the dashboard.
    */
   const handleGoogleSignIn = async () => {
     const { error } = await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {
-        redirectTo: `${window.location.origin}/auth/callback`,
+        // Let the browser do the redirect to Google (default behavior).
+        skipBrowserRedirect: false,
+        redirectTo: `${window.location.origin}/`,
+        queryParams: {
+          // Force a fresh Google consent + request a refresh token, which
+          // avoids stale authorization codes ("Unable to exchange code").
+          access_type: "offline",
+          prompt: "consent",
+        },
       },
     });
     if (error) console.error("Google Auth Error:", error.message);

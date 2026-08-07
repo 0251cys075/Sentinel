@@ -7,6 +7,7 @@ const PUBLIC_PATHS = ["/login", "/landing", "/track", "/sos/track", "/auth", "/a
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
+  const searchParams = request.nextUrl.searchParams;
 
   // Build a mutable response we can attach refreshed cookies to.
   let response = NextResponse.next({ request });
@@ -33,6 +34,34 @@ export async function middleware(request: NextRequest) {
         },
       }
     );
+
+    // Google OAuth returns to the site root with a one-time PKCE `?code=`.
+    // Exchange it here — before any route guard runs — using the code
+    // verifier stored in the request cookies, then send the user to the
+    // dashboard with the returned session fresh in cookies.
+    if (searchParams.has("code") && !PUBLIC_PATHS.some(
+      (p) => pathname === p || pathname.startsWith(p + "/")
+    )) {
+      const { error } = await supabase.auth.exchangeCodeForSession(
+        searchParams.get("code")!
+      );
+
+      const url = request.nextUrl.clone();
+      url.searchParams.delete("code");
+      url.searchParams.delete("next");
+      if (error) {
+        url.pathname = "/login";
+        url.searchParams.set("error", "auth");
+      } else {
+        url.pathname = "/";
+      }
+
+      const target = NextResponse.redirect(url);
+      response.cookies.getAll().forEach(({ name, value, ...rest }) =>
+        target.cookies.set(name, value, rest)
+      );
+      return target;
+    }
 
     // Refreshes the session — must be called before any redirect logic.
     const {
