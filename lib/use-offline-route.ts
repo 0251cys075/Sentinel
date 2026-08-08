@@ -17,6 +17,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getSupabaseBrowser } from "@/lib/supabase/client";
+import { writeLastKnownLocation } from "@/lib/sos";
 
 export interface OfflineRoutePoint {
   lat: number;
@@ -149,6 +150,10 @@ export function useOfflineRoute({
         recorded_at: new Date().toISOString(),
       };
       writeQueue([...queueRef.current, point].slice(-MAX_QUEUED_POINTS));
+
+      // Keep the offline-SOS "last known location" cache warm: the SOS
+      // fallback SMS reads this synchronously when the network is gone.
+      writeLastKnownLocation(point.lat, point.lng);
 
       // Connectivity is back and points are still pending — sync on the spot
       // so a missed `online` event can never strand the queue.

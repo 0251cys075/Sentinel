@@ -14,6 +14,8 @@ import {
     generateGuestToken,
     guestTokenExpiry,
     isMobileDevice,
+    launchSmsUri,
+    readLastKnownLocation,
   } from "@/lib/sos";
 import { useToast } from "@/components/toast";
 import { Card } from "@/components/primitives";
@@ -169,38 +171,12 @@ function SosScreen() {
   );
 
   /**
-   * One-shot geolocation resolve (5s cap). Returns `null` on denial, timeout
-   * or missing permission — callers degrade to a location-less SMS.
-   */
-  const resolveLastKnownPosition = useCallback((): Promise<{ lat: number; lng: number } | null> => {
-    if (typeof navigator === "undefined" || !("geolocation" in navigator)) {
-      return Promise.resolve(null);
-    }
-    return new Promise((resolve) => {
-      // Hardware call, zero network: cached-fix-first and 3s-capped so the
-      // SOS SMS is never held hostage to a long satellite hunt in a dead
-      // zone. Denial/timeout/missing hardware all resolve to null and the
-      // caller falls back to a location-less SMS.
-      const timer = setTimeout(() => resolve(null), 3000);
-      navigator.geolocation.getCurrentPosition(
-        (pos) => {
-          clearTimeout(timer);
-          resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude });
-        },
-        () => {
-          clearTimeout(timer);
-          resolve(null);
-        },
-        { enableHighAccuracy: false, timeout: 3000, maximumAge: 60000 }
-      );
-    });
-  }, []);
-
-  /**
    * Offline fallback: no network — and when upstream calls fail — the native
-   * SMS composer is the only channel left. Grab the last known position,
-   * pre-fill `sms:` links for every primary contact with a maps link, and
-   * return true if any usable SMS target exists.
+   * SMS composer is the only channel left. Reads the cached last-known fix
+   * SYNCHRONOUSLY (no fresh geolocation call: a dead zone must never hang
+   * the emergency on a satellite hunt), pre-fills `sms:` links for every
+   * primary contact with a maps link, and returns true if any usable SMS
+   * target exists.
    *
    * Guaranteed action: when no trusted contacts are cached, the SOS still
    * fires to the user's stored `emergency_contact` number (else 112) with
@@ -208,8 +184,10 @@ function SosScreen() {
    * SMS no matter what state the app is in.
    */
   const sendOfflineSms = useCallback(async (): Promise<boolean> => {
-    const pos = await resolveLastKnownPosition();
-    const locationUrl = pos ? buildMapsLocationUrl(pos.lat, pos.lng) : null;
+    const cachedLoc = readLastKnownLocation();
+    const locationUrl = cachedLoc
+      ? buildMapsLocationUrl(cachedLoc.lat, cachedLoc.lng)
+      : null;
 
     const contacts = primaryContactsRef.current;
     let smsUris = contacts
@@ -235,7 +213,7 @@ function SosScreen() {
 
     setShareInfo({ guestUrl: "", smsUris });
     return true;
-  }, [resolveLastKnownPosition]);
+  }, []);
 
   /**
    * Insert the `sos` alert (with its public guest tracking token), hand the
@@ -398,12 +376,12 @@ function SosScreen() {
     if (!shareInfo.smsUris.length) return;
 
     if (offlineSms) {
-      window.location.href = shareInfo.smsUris[0].uri;
+      launchSmsUri(shareInfo.smsUris[0].uri);
       return;
     }
     if (!isMobileDevice(navigator.userAgent)) return;
     const t = setTimeout(() => {
-      window.location.href = shareInfo.smsUris[0].uri;
+      launchSmsUri(shareInfo.smsUris[0].uri);
     }, 1200);
     return () => clearTimeout(t);
   }, [confirmed, shareInfo, offlineSms]);

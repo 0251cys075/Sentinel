@@ -131,6 +131,63 @@ export const EMERGENCY_GPS_OPTIONS: PositionOptions = {
   maximumAge: 60_000,
 };
 
+/** localStorage key for the last known GPS fix (JSON `{lat, lng}`). */
+export const LAST_KNOWN_LOCATION_KEY = "last_known_location";
+
+/**
+ * Synchronous read of the cached last-known fix — the offline SOS uses this
+ * INSTEAD of a fresh geolocation call, so a dead zone can never hang the
+ * emergency path on a satellite hunt. Returns null when absent/corrupt.
+ */
+export function readLastKnownLocation(): { lat: number; lng: number } | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(LAST_KNOWN_LOCATION_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { lat?: unknown; lng?: unknown };
+    if (
+      parsed &&
+      typeof parsed.lat === "number" &&
+      typeof parsed.lng === "number" &&
+      Number.isFinite(parsed.lat) &&
+      Number.isFinite(parsed.lng)
+    ) {
+      return { lat: parsed.lat, lng: parsed.lng };
+    }
+  } catch {
+    /* corrupt cache — treat as unknown */
+  }
+  return null;
+}
+
+/** Best-effort write of the latest GPS fix into the offline-SOS cache. */
+export function writeLastKnownLocation(lat: number, lng: number): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(
+      LAST_KNOWN_LOCATION_KEY,
+      JSON.stringify({ lat, lng, recorded_at: new Date().toISOString() })
+    );
+  } catch {
+    /* storage blocked — the in-memory fix still works */
+  }
+}
+
+/**
+ * Fire a `sms:` URI through a real DOM anchor click — the mechanism mobile
+ * browsers/WebViews reliably honor for custom-scheme handles (a bare
+ * `window.location.href` assignment is silently swallowed in some WebViews).
+ */
+export function launchSmsUri(uri: string): void {
+  if (typeof document === "undefined" || !uri) return;
+  const link = document.createElement("a");
+  link.href = uri;
+  link.rel = "noopener";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+}
+
 /**
  * One-shot native SMS launch — the resilient emergency action that needs
  * ZERO network. Resolves the number (stored `emergency_contact` → 112),
@@ -144,7 +201,7 @@ export function launchEmergencySms(loc: { lat: number; lng: number } | null = nu
     emergencySmsNumber(),
     buildEmergencySmsMessage(locationUrl)
   );
-  window.location.href = uri || `sms:${emergencySmsNumber()}`;
+  launchSmsUri(uri || `sms:${emergencySmsNumber()}`);
 }
 
 /**
