@@ -101,6 +101,6 @@ export const config = {
      * Match all request paths EXCEPT static assets, images, and the SW file.
      * This keeps the middleware out of the critical path for those resources.
      */
-    "/((?!_next/static|_next/image|favicon\\.ico|manifest\\.webmanifest|firebase-messaging-sw\\.js|.*\\.(?:svg|png|jpg|jpeg|webp|gif)$).*)",
+    "/((?!_next/static|_next/image|favicon\\.ico|manifest\\.(?:json|webmanifest)|firebase-messaging-sw\\.js|.*\\.(?:svg|png|jpg|jpeg|webp|gif)$).*)",
   ],
 };

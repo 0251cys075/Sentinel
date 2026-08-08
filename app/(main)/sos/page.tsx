@@ -176,7 +176,11 @@ function SosScreen() {
       return Promise.resolve(null);
     }
     return new Promise((resolve) => {
-      const timer = setTimeout(() => resolve(null), 5000);
+      // Hardware call, zero network: cached-fix-first and 3s-capped so the
+      // SOS SMS is never held hostage to a long satellite hunt in a dead
+      // zone. Denial/timeout/missing hardware all resolve to null and the
+      // caller falls back to a location-less SMS.
+      const timer = setTimeout(() => resolve(null), 3000);
       navigator.geolocation.getCurrentPosition(
         (pos) => {
           clearTimeout(timer);
@@ -186,7 +190,7 @@ function SosScreen() {
           clearTimeout(timer);
           resolve(null);
         },
-        { enableHighAccuracy: true, timeout: 5000, maximumAge: 30000 }
+        { enableHighAccuracy: false, timeout: 3000, maximumAge: 60000 }
       );
     });
   }, []);

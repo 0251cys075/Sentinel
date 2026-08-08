@@ -122,6 +122,31 @@ export function buildEmergencySmsMessage(locationUrl: string | null): string {
   return `EMERGENCY! I need immediate help.${location}`;
 }
 
+/** GPS pass for the SOS SMS (fast, cached-fix-first): the SMS must fire in
+ *  seconds, not after a high-accuracy satellite hunt. If the fix comes back
+ *  it carries the maps link, otherwise the message is sent location-less. */
+export const EMERGENCY_GPS_OPTIONS: PositionOptions = {
+  enableHighAccuracy: false,
+  timeout: 3_000,
+  maximumAge: 60_000,
+};
+
+/**
+ * One-shot native SMS launch — the resilient emergency action that needs
+ * ZERO network. Resolves the number (stored `emergency_contact` → 112),
+ * attaches the maps link when a position is known, and hands off to the
+ * phone's SMS composer synchronously.
+ */
+export function launchEmergencySms(loc: { lat: number; lng: number } | null = null): void {
+  if (typeof window === "undefined") return;
+  const locationUrl = loc ? buildMapsLocationUrl(loc.lat, loc.lng) : null;
+  const uri = buildSosSmsDeepLink(
+    emergencySmsNumber(),
+    buildEmergencySmsMessage(locationUrl)
+  );
+  window.location.href = uri || `sms:${emergencySmsNumber()}`;
+}
+
 /**
  * Coarse mobile detect for the auto-open redirect. Guarded so a walk on a
  * desktop/tablet never hijacks the app into a dead sms: handler.
