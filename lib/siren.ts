@@ -107,7 +107,11 @@ function ensureSynthSiren() {
   oscA.connect(master);
   oscB.connect(master);
   master.connect(ctx.destination);
-  master.gain.linearRampToValueAtTime(0.3, ctx.currentTime + 0.15);
+  // 0.55 not 0.3 — the "faint beep" users could not hear was this gain
+  // riding too low under the phone speaker's own compression. With the
+  // full-screen red overlay (shake-detector.tsx) the alarm is now loud
+  // AND visible.
+  master.gain.linearRampToValueAtTime(0.55, ctx.currentTime + 0.15);
 
   oscA.start();
   oscB.start();

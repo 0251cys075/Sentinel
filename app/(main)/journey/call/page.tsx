@@ -12,6 +12,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useToast } from "@/components/toast";
+import { useSentinelState } from "@/hooks/useSentinelState";
+
+/** Short confirmatory haptic when the broadcast arms (distinct from SOS). */
+const FAKE_CALL_ARM_VIBRATION = [200, 100, 200] as const;
 
 const OFFICER_NAME = "Inspector V. Sharma";
 const OFFICER_ROLE = "UP Police 112 Dispatch Control Room";
@@ -225,6 +229,7 @@ function InspectorAvatar({ alt }: { alt: string }) {
 export default function FakeCallPage() {
   const router = useRouter();
   const toast = useToast();
+  const { mode, broadcastActive, endSession } = useSentinelState();
 
   const [elapsed, setElapsed] = useState(0);
   const [camState, setCamState] = useState<"idle" | "live" | "denied">("idle");
@@ -235,6 +240,22 @@ export default function FakeCallPage() {
   const timersRef = useRef<number[]>([]);
   const gpsWatchRef = useRef<number | null>(null);
   const speechKickedRef = useRef(false);
+
+  /* ── Persist the broadcast session the instant the call page opens, so a
+     refresh in the middle of the call restores this exact overlay instead
+     of dropping back to the home screen. A fresh entry (mode was IDLE)
+     gets a confirmatory haptic bolt; a refresh-restore stays silent. ── */
+  useEffect(() => {
+    if (mode === "IDLE" && "vibrate" in navigator) {
+      try {
+        navigator.vibrate([...FAKE_CALL_ARM_VIBRATION]);
+      } catch {
+        /* vibration unsupported */
+      }
+    }
+    broadcastActive();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   /* ── Request front camera IMMEDIATELY on page load ── */
   useEffect(() => {
@@ -335,12 +356,22 @@ export default function FakeCallPage() {
   /* ── End broadcast: hard cleanup → dashboard with success toast ── */
   const endCall = useCallback(() => {
     stopEverything();
+    endSession();
     toast("Broadcast ended — you're safe. Sentinel is watching.");
     router.push("/");
-  }, [stopEverything, router, toast]);
+  }, [stopEverything, endSession, router, toast]);
 
   // Full hardware + audio teardown if the route unmounts (back nav, etc.).
-  useEffect(() => () => stopEverything(), [stopEverything]);
+  // The emergency session is ALSO closed here: SPA navigation runs this
+  // cleanup, while a true page refresh does not — so a mid-call reload
+  // keeps the persisted session and restores the overlay on the next boot.
+  useEffect(
+    () => () => {
+      stopEverything();
+      endSession();
+    },
+    [stopEverything, endSession]
+  );
 
   /* ── Live MM:SS session timer ── */
   useEffect(() => {

@@ -24,8 +24,25 @@ import { useLiveTelemetry } from "@/lib/use-live-telemetry";
 import { useOfflineRoute } from "@/lib/use-offline-route";
 import { useStreetName } from "@/lib/use-street-name";
 import { SOS_BURST_MS, stopSiren, triggerEmergencyAlarm } from "@/lib/siren";
+import { useSentinelState } from "@/hooks/useSentinelState";
 
 const SOS_COUNTDOWN_SECONDS = 8;
+
+/**
+ * Refreshed-mid-emergency resilience: the confirmed SOS screen (guest link,
+ * SMS targets, live trip, offline flag) is snapshotted here under
+ * `sentinel_sos_session` and rehydrated on mount, so a page reload can
+ * never downgrade a confirmed "Help is on the way" back into a countdown.
+ */
+const SOS_SESSION_STORAGE_KEY = "sentinel_sos_session";
+
+interface SosRestoreSession {
+  confirmed?: boolean;
+  guestUrl?: string;
+  smsUris?: { name: string; uri: string }[];
+  tripId?: string | null;
+  offlineSms?: boolean;
+}
 
 interface PrimaryContact {
   name: string;
@@ -45,6 +62,7 @@ function SosScreen() {
   const toast = useToast();
   const params = useSearchParams();
   const tripIdParam = params.get("trip") ?? "";
+  const { triggerSos, endSession } = useSentinelState();
 
   const [left, setLeft] = useState(SOS_COUNTDOWN_SECONDS);
   const [primaryContacts, setPrimaryContacts] = useState<PrimaryContact[]>([]);
@@ -129,6 +147,87 @@ function SosScreen() {
   }, []);
 
   /**
+   * Snapshot the confirmed SOS to sessionStorage. Called on every success
+   * path (online, offline SMS fallback and catch-path fallback) so a page
+   * refresh mid-emergency can replay the exact confirmed screen.
+   */
+  const persistSosSession = useCallback(
+    (
+      info: { guestUrl: string; smsUris: { name: string; uri: string }[] },
+      tripId: string | null,
+      offlineSms: boolean
+    ) => {
+      const snapshot: SosRestoreSession = {
+        confirmed: true,
+        guestUrl: info.guestUrl,
+        smsUris: info.smsUris,
+        tripId,
+        offlineSms,
+      };
+      try {
+        window.sessionStorage.setItem(
+          SOS_SESSION_STORAGE_KEY,
+          JSON.stringify(snapshot)
+        );
+      } catch {
+        /* storage blocked — in-memory session still runs */
+      }
+    },
+    []
+  );
+
+  const clearSosSession = useCallback(() => {
+    try {
+      window.sessionStorage.removeItem(SOS_SESSION_STORAGE_KEY);
+    } catch {
+      /* storage blocked — nothing to clean */
+    }
+  }, []);
+
+  /**
+   * Restore a confirmed SOS after a page refresh: replay the share links,
+   * the offline flag and the live trip id, and jump straight to the
+   * "Help is on the way" screen — never back into the 8-second countdown.
+   * The snapshot is consumed on read so it can never replay twice.
+   */
+  useEffect(() => {
+    let raw: string | null = null;
+    try {
+      raw = window.sessionStorage.getItem(SOS_SESSION_STORAGE_KEY);
+    } catch {
+      /* storage blocked — nothing to restore */
+    }
+    if (!raw) return;
+
+    let saved: SosRestoreSession;
+    try {
+      saved = JSON.parse(raw) as SosRestoreSession;
+    } catch {
+      return; /* corrupt snapshot — ignore */
+    }
+    if (!saved.confirmed) return;
+
+    doneRef.current = true;
+    if (saved.tripId) setStreamTripId(saved.tripId);
+    if (saved.offlineSms) setOfflineSms(true);
+    setShareInfo({
+      guestUrl: saved.guestUrl ?? "",
+      smsUris: Array.isArray(saved.smsUris) ? saved.smsUris : [],
+    });
+    setConfirmed(true);
+    toast("SOS session restored — help is still on the way.");
+    clearSosSession();
+  }, [toast, clearSosSession]);
+
+  /* SPA-leave (back button etc.) ends the session for real; a hard page
+     refresh skips this cleanup, which is exactly what lets the last
+     snapshot survive the reload. */
+  useEffect(() => () => {
+    endSession();
+    clearSosSession();
+  }, [endSession, clearSosSession]);
+
+  /**
    * Pick the trip the SOS alert attaches to: the one passed via ?trip=,
    * else the user's most recent trip (any status). If the user has no
    * trips at all, create a placeholder "Emergency" trip so the alert
@@ -183,7 +282,10 @@ function SosScreen() {
    * the exact "EMERGENCY! I need immediate help." message — a real, usable
    * SMS no matter what state the app is in.
    */
-  const sendOfflineSms = useCallback(async (): Promise<boolean> => {
+  const sendOfflineSms = useCallback(async (): Promise<{
+    ok: boolean;
+    smsUris: { name: string; uri: string }[];
+  }> => {
     const cachedLoc = readLastKnownLocation();
     const locationUrl = cachedLoc
       ? buildMapsLocationUrl(cachedLoc.lat, cachedLoc.lng)
@@ -209,10 +311,10 @@ function SosScreen() {
         ];
       }
     }
-    if (!smsUris.length) return false;
+    if (!smsUris.length) return { ok: false, smsUris: [] };
 
     setShareInfo({ guestUrl: "", smsUris });
-    return true;
+    return { ok: true, smsUris };
   }, []);
 
   /**
@@ -229,11 +331,13 @@ function SosScreen() {
       //    straight to the native SMS composer. Identical hardware response
       //    to the online path: same alarm, same stop contract. ──
       if (typeof navigator !== "undefined" && navigator.onLine === false) {
-        const ok = await sendOfflineSms();
+        const { ok, smsUris } = await sendOfflineSms();
         if (ok) {
           triggerEmergencyAlarm(SOS_BURST_MS);
           setOfflineSms(true);
           setConfirmed(true);
+          persistSosSession({ guestUrl: "", smsUris }, null, true);
+          triggerSos();
           return true;
         }
         doneRef.current = false;
@@ -308,16 +412,20 @@ function SosScreen() {
 
       setShareInfo({ guestUrl: guestUrl ?? "", smsUris });
       triggerEmergencyAlarm(SOS_BURST_MS);
+      persistSosSession({ guestUrl: guestUrl ?? "", smsUris }, tripId, false);
+      triggerSos();
       return true;
     } catch (err) {
       // API call failed (no network despite navigator.onLine, Supabase down,
       // insert rejected…) — degrade to the offline SMS composer instead of
       // leaving the user with nothing.
-      const offlineOk = await sendOfflineSms();
-      if (offlineOk) {
+      const { ok, smsUris } = await sendOfflineSms();
+      if (ok) {
         triggerEmergencyAlarm(SOS_BURST_MS);
         setOfflineSms(true);
         setConfirmed(true);
+        persistSosSession({ guestUrl: "", smsUris }, null, true);
+        triggerSos();
         return true;
       }
       doneRef.current = false;
@@ -330,7 +438,7 @@ function SosScreen() {
       toast("SOS failed: " + message);
       return false;
     }
-  }, [resolveTripId, sendOfflineSms, toast]);
+  }, [resolveTripId, sendOfflineSms, toast, persistSosSession, triggerSos]);
 
   /* Countdown — pure ticking, no side effects inside the state updater. */
   useEffect(() => {
@@ -361,6 +469,8 @@ function SosScreen() {
     if (doneRef.current || sending) return;
     doneRef.current = true;
     stopSiren(); // alarm must die with the SOS the user just cancelled
+    endSession(); // forget the session — a cancelled SOS restores nothing
+    clearSosSession();
     toast("SOS cancelled — you're safe.");
     if (window.history.length > 1) window.history.back();
     else router.push("/");
@@ -479,7 +589,11 @@ function SosScreen() {
 
         <button
           type="button"
-          onClick={() => router.push("/")}
+          onClick={() => {
+            endSession();
+            clearSosSession();
+            router.push("/");
+          }}
           className="mt-6 w-full rounded-[15px] bg-primary px-[18px] py-4 font-bold text-white shadow-[0_10px_24px_rgba(15,110,86,0.18)]"
         >
           Return home
