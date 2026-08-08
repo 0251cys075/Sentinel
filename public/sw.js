@@ -3,8 +3,12 @@
  *
  * Strategy:
  *  - `install`  → precache the static app shell ("/" HTML route, icons,
- *                 manifest, siren audio) — everything needed for a first
- *                 offline load.
+ *                 manifest, siren audio), then DISCOVER the Next.js app
+ *                 bundle inside that HTML and precache every `/_next/static/`
+ *                 JS/CSS asset (plus the self-hosted fonts inside the CSS)
+ *                 — so the very first offline open works, not just
+ *                 follow-up visits. Everything is best-effort: a single
+ *                 missing file (e.g. /favicon.ico) must never abort install.
  *  - `fetch`    → navigations are network-first (fall back to the cached
  *                 shell when offline); hashed Next.js build assets and
  *                 static icons/audio are cache-first (immutable URLs, zero
@@ -13,14 +17,13 @@
  *  - `activate` → purge stale caches so old builds never linger.
  */
 
-const VERSION = "v3";
+const VERSION = "v4";
 const CORE_CACHE = `sentinel-core-${VERSION}`;
 const RUNTIME_CACHE = `sentinel-runtime-${VERSION}`;
 
 /** Essential offline-first assets — index shell, icons, CSS bundles,
  *  manifest, siren/alarm sounds and the branded offline fallback page.
- *  /_next/static/ is filled on the fly by the runtime cache (hashed
- *  filenames → safe to cache-first). */
+ *  /_next/static/ is discovered from the shell and filled during install. */
 const PRECACHE_URLS = [
   "/",
   "/offline.html",
@@ -29,15 +32,52 @@ const PRECACHE_URLS = [
   "/sounds/siren.wav",
 ];
 
+/** Every /_next/static/ URL referenced in an HTML/CSS document. */
+function collectStaticUrls(...docs) {
+  const urls = new Set();
+  for (const doc of docs) {
+    for (const m of doc.matchAll(/(?:src|href)="(\/_next\/static\/[^"]+)"/g)) {
+      urls.add(m[1]);
+    }
+    for (const m of doc.matchAll(/url\((['"]?)(\/_next\/static\/[^)"']+)\1\)/g)) {
+      urls.add(m[2]);
+    }
+  }
+  return [...urls];
+}
+
+/**
+ * Precache the entire app bundle during install:
+ *  1. the shell URLs above,
+ *  2. every JS/CSS chunk referenced by the cached "/" HTML,
+ *  3. every font file referenced by those CSS chunks.
+ * allSettled everywhere: a missing favicon or font must never abort the
+ * whole cache build.
+ */
+async function precacheAppBundle(cache) {
+  await Promise.allSettled(PRECACHE_URLS.map((url) => cache.add(url)));
+
+  const shell = await cache.match("/");
+  if (!shell) return;
+  const html = await shell.text();
+  const bundleUrls = collectStaticUrls(html);
+  await Promise.allSettled(bundleUrls.map((url) => cache.add(url)));
+
+  const fonts = new Set();
+  for (const cssUrl of bundleUrls.filter((u) => u.endsWith(".css"))) {
+    const cssResponse = await cache.match(cssUrl).catch(() => null);
+    if (!cssResponse) continue;
+    const css = await cssResponse.text();
+    for (const fontUrl of collectStaticUrls(css)) fonts.add(fontUrl);
+  }
+  await Promise.allSettled([...fonts].map((url) => cache.add(url)));
+}
+
 self.addEventListener("install", (event) => {
   event.waitUntil(
     caches
       .open(CORE_CACHE)
-      .then((cache) =>
-        // Best-effort: a single 404 (e.g. missing sound file) must never
-        // abort the whole install.
-        Promise.allSettled(PRECACHE_URLS.map((url) => cache.add(url)))
-      )
+      .then(precacheAppBundle)
       .then(() => self.skipWaiting())
   );
 });
