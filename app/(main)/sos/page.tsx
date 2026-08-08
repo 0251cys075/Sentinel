@@ -4,13 +4,15 @@ import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { getSupabaseBrowser } from "@/lib/supabase/client";
 import {
-  buildGuestTrackUrl,
-  buildSosMessage,
-  buildSosSmsDeepLink,
-  generateGuestToken,
-  guestTokenExpiry,
-  isMobileDevice,
-} from "@/lib/sos";
+    buildGuestTrackUrl,
+    buildMapsLocationUrl,
+    buildOfflineSosMessage,
+    buildSosMessage,
+    buildSosSmsDeepLink,
+    generateGuestToken,
+    guestTokenExpiry,
+    isMobileDevice,
+  } from "@/lib/sos";
 import { useToast } from "@/components/toast";
 import { Card } from "@/components/primitives";
 import { SpeedBadge } from "@/components/speed-badge";
@@ -42,6 +44,8 @@ function SosScreen() {
   const [primaryContacts, setPrimaryContacts] = useState<PrimaryContact[]>([]);
   const [sending, setSending] = useState(false);
   const [confirmed, setConfirmed] = useState(false);
+  /** True when the SOS went out via the offline SMS fallback (no network). */
+  const [offlineSms, setOfflineSms] = useState(false);
 
   /** Trip being streamed live after SOS fires (see confirmSos). */
   const [streamTripId, setStreamTripId] = useState<string | null>(null);
@@ -72,17 +76,42 @@ function SosScreen() {
     primaryContactsRef.current = primaryContacts;
   }, [primaryContacts]);
 
+  // Contacts load: hydrated from a localStorage cache first (survives offline
+  // start), then refreshed from the API and re-cached so an offline SOS
+  // always has numbers to message.
+  const CONTACTS_CACHE_KEY = "sentinel_primary_contacts";
   useEffect(() => {
-    getSupabaseBrowser()
-      .from("trusted_contacts")
-      .select("name, phone")
-      .eq("tier", "primary")
-      .eq("verified", true)
-      .then(({ data }) =>
-        setPrimaryContacts(
-          (data ?? []).map((c) => ({ name: c.name, phone: c.phone }) as PrimaryContact)
-        )
-      );
+    try {
+      const cached = window.localStorage.getItem(CONTACTS_CACHE_KEY);
+      if (cached) {
+        const parsed = JSON.parse(cached) as PrimaryContact[];
+        if (Array.isArray(parsed)) setPrimaryContacts(parsed);
+      }
+    } catch {
+      /* corrupt cache — ignore */
+    }
+    void (async () => {
+      try {
+        const { data } = await getSupabaseBrowser()
+          .from("trusted_contacts")
+          .select("name, phone")
+          .eq("tier", "primary")
+          .eq("verified", true);
+        const contacts = (data ?? []).map(
+          (c) => ({ name: c.name, phone: c.phone }) as PrimaryContact
+        );
+        setPrimaryContacts(contacts);
+        if (contacts.length) {
+          try {
+            window.localStorage.setItem(CONTACTS_CACHE_KEY, JSON.stringify(contacts));
+          } catch {
+            /* storage full/blocked — ignore */
+          }
+        }
+      } catch {
+        /* offline — the cached contacts above keep the fallback alive */
+      }
+    })();
   }, []);
 
   /**
@@ -128,6 +157,52 @@ function SosScreen() {
   );
 
   /**
+   * One-shot geolocation resolve (5s cap). Returns `null` on denial, timeout
+   * or missing permission — callers degrade to a location-less SMS.
+   */
+  const resolveLastKnownPosition = useCallback((): Promise<{ lat: number; lng: number } | null> => {
+    if (typeof navigator === "undefined" || !("geolocation" in navigator)) {
+      return Promise.resolve(null);
+    }
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => resolve(null), 5000);
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          clearTimeout(timer);
+          resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+        },
+        () => {
+          clearTimeout(timer);
+          resolve(null);
+        },
+        { enableHighAccuracy: true, timeout: 5000, maximumAge: 30000 }
+      );
+    });
+  }, []);
+
+  /**
+   * Offline fallback: no network — and when upstream calls fail — the native
+   * SMS composer is the only channel left. Grab the last known position,
+   * pre-fill `sms:` links for every primary contact with a maps link, and
+   * return true if any usable SMS target exists.
+   */
+  const sendOfflineSms = useCallback(async (): Promise<boolean> => {
+    const contacts = primaryContactsRef.current;
+    if (!contacts.length) return false;
+
+    const pos = await resolveLastKnownPosition();
+    const locationUrl = pos ? buildMapsLocationUrl(pos.lat, pos.lng) : null;
+    const message = buildOfflineSosMessage(locationUrl);
+    const smsUris = contacts
+      .map((c) => ({ name: c.name, uri: buildSosSmsDeepLink(c.phone, message) }))
+      .filter((u) => u.uri);
+    if (!smsUris.length) return false;
+
+    setShareInfo({ guestUrl: "", smsUris });
+    return true;
+  }, [resolveLastKnownPosition]);
+
+  /**
    * Insert the `sos` alert (with its public guest tracking token), hand the
    * tokenized link to the notification API, then compose the sms: deep links
    * for the primary contacts.
@@ -137,6 +212,21 @@ function SosScreen() {
     doneRef.current = true;
     setSending(true);
     try {
+      // ── Offline path: no network at all — skip Supabase entirely and go
+      //    straight to the native SMS composer. ──
+      if (typeof navigator !== "undefined" && navigator.onLine === false) {
+        const ok = await sendOfflineSms();
+        if (ok) {
+          setOfflineSms(true);
+          setConfirmed(true);
+          return true;
+        }
+        doneRef.current = false;
+        setSending(false);
+        toast("Offline and no emergency contacts stored — reconnect or call a contact directly.");
+        return false;
+      }
+
       const supabase = getSupabaseBrowser();
       const {
         data: { user },
@@ -204,6 +294,15 @@ function SosScreen() {
       setShareInfo({ guestUrl: guestUrl ?? "", smsUris });
       return true;
     } catch (err) {
+      // API call failed (no network despite navigator.onLine, Supabase down,
+      // insert rejected…) — degrade to the offline SMS composer instead of
+      // leaving the user with nothing.
+      const offlineOk = await sendOfflineSms();
+      if (offlineOk) {
+        setOfflineSms(true);
+        setConfirmed(true);
+        return true;
+      }
       doneRef.current = false;
       setSending(false);
       console.error("SOS confirm failed:", err);
@@ -214,7 +313,7 @@ function SosScreen() {
       toast("SOS failed: " + message);
       return false;
     }
-  }, [resolveTripId, toast]);
+  }, [resolveTripId, sendOfflineSms, toast]);
 
   /* Countdown — pure ticking, no side effects inside the state updater. */
   useEffect(() => {
@@ -250,16 +349,24 @@ function SosScreen() {
   };
 
   /* Feature 2: on phones, bounce straight into the SMS composer pre-filled
-   * with the no-login guest link. Desktop keeps the on-screen buttons. */
+   * with the no-login guest link. Desktop keeps the on-screen buttons.
+   * Offline fallback: open the composer on ANY device — the sms: link is
+   * the only channel that still works without a network. */
   useEffect(() => {
     if (!confirmed || !shareInfo || smsFiredRef.current) return;
     smsFiredRef.current = true;
-    if (!isMobileDevice(navigator.userAgent) || !shareInfo.smsUris.length) return;
+    if (!shareInfo.smsUris.length) return;
+
+    if (offlineSms) {
+      window.location.href = shareInfo.smsUris[0].uri;
+      return;
+    }
+    if (!isMobileDevice(navigator.userAgent)) return;
     const t = setTimeout(() => {
       window.location.href = shareInfo.smsUris[0].uri;
     }, 1200);
     return () => clearTimeout(t);
-  }, [confirmed, shareInfo]);
+  }, [confirmed, shareInfo, offlineSms]);
 
   const copyGuestLink = async () => {
     if (!shareInfo?.guestUrl) return;
@@ -278,19 +385,23 @@ function SosScreen() {
         <div className="soscheck">
           <div>✓</div>
         </div>
-        <div className="eyebrow !text-primary">SOS sent</div>
+        <div className="eyebrow !text-primary">{offlineSms ? "SMS sent" : "SOS sent"}</div>
         <h1 className="font-display mt-2 text-[30px] font-bold leading-[1.15]">
-          Help is on the way
+          {offlineSms ? "SMS opened with your location" : "Help is on the way"}
         </h1>
         <p className="mt-3 leading-[1.6] text-muted">
-          {smsTargets.length
-            ? "Opening your SMS app for the first contact — one tap and the live tracking link goes out."
-            : "Your trusted contacts have been notified with your location."}
+          {offlineSms
+            ? "You're offline — your SMS app has opened with your last known location. One tap and it goes out to your circle."
+            : smsTargets.length
+              ? "Opening your SMS app for the first contact — one tap and the live tracking link goes out."
+              : "Your trusted contacts have been notified with your location."}
         </p>
 
         {smsTargets.length > 0 && (
           <div className="mt-4 text-left">
-            <div className="eyebrow mb-2">Send live tracking SMS</div>
+            <div className="eyebrow mb-2">
+              {offlineSms ? "Send location SMS" : "Send live tracking SMS"}
+            </div>
             {smsTargets.map((t) => (
               <a
                 key={t.uri}
@@ -314,7 +425,8 @@ function SosScreen() {
         )}
 
         {/* ── Live telemetry: GPS stream + speed broadcast to guests ── */}
-        <div className="mt-4 rounded-[14px] border border-line bg-card p-4 text-left">
+        {!offlineSms && streamTripId && (
+          <div className="mt-4 rounded-[14px] border border-line bg-card p-4 text-left">
           <div className="flex items-center justify-between">
             <b className="text-sm">Live location sharing</b>
             <span className="dot pulse" />
@@ -338,7 +450,8 @@ function SosScreen() {
               Open live journey map
             </button>
           )}
-        </div>
+          </div>
+        )}
 
         <button
           type="button"

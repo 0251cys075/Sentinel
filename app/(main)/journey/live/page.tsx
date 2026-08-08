@@ -18,6 +18,7 @@ import {
 import { SpeedBadge } from "@/components/speed-badge";
 import { dynamicEtaMin, remainingKm } from "@/lib/telemetry";
 import { useLiveTelemetry } from "@/lib/use-live-telemetry";
+import { useOfflineRoute } from "@/lib/use-offline-route";
 import { useStreetName } from "@/lib/use-street-name";
 import type { Alert, Trip, TripLocation } from "@/lib/types";
 
@@ -58,6 +59,7 @@ function LiveScreen() {
   const [demoOpen, setDemoOpen] = useState(false);
   const [arriving, setArriving] = useState(false);
   const arrivedRef = useRef(false);
+  const prevQueuedRef = useRef(0);
 
   // ── Feature 1: live telemetry stream (GPS + speed + demo simulator) ──
   const tel = useLiveTelemetry({
@@ -65,6 +67,24 @@ function LiveScreen() {
     enabled: !!tripId,
     travelMode: trip?.transit_mode ?? "Walk",
   });
+
+  // ── Feature 3: offline breadcrumbs — GPS keeps recording to localStorage
+  //    in dead zones; the `online` event/next fix bulk-syncs to Supabase. ──
+  const offline = useOfflineRoute({
+    tripId: tripId || null,
+    enabled: !!tripId && !tel.demoMode,
+    travelMode: trip?.transit_mode ?? "Walk",
+  });
+
+  /* Feature 3: announce a successful offline-route sync (queue drained). */
+  useEffect(() => {
+    if (prevQueuedRef.current > 0 && offline.queuedCount === 0) {
+      toast(`Offline route synced — ${prevQueuedRef.current} breadcrumb${prevQueuedRef.current === 1 ? "" : "s"} uploaded`);
+      prevQueuedRef.current = 0;
+    } else if (offline.queuedCount > 0) {
+      prevQueuedRef.current = offline.queuedCount;
+    }
+  }, [offline.queuedCount, toast]);
 
   // ── 📍 Nearby safety point: street / locality for the current fix ──
   const street = useStreetName(tel.gps?.lat ?? null, tel.gps?.lng ?? null);
@@ -420,6 +440,12 @@ function LiveScreen() {
             ? " An alert was raised for this journey — Sentinel is acting."
             : " No action needed."}
         </p>
+        {offline.queuedCount > 0 && (
+          <p className="mt-2 rounded-[12px] bg-primary2 px-3 py-2 text-xs font-bold leading-[1.5] text-primary">
+            📡 Offline: {offline.queuedCount} breadcrumb{offline.queuedCount === 1 ? "" : "s"} saved
+            locally — they&apos;ll auto-sync when you&apos;re back online.
+          </p>
+        )}
       </Card>
 
       <div className="mt-3 grid grid-cols-2 gap-2.5">

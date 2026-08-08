@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Inter, Poppins } from "next/font/google";
 import { Providers } from "@/components/providers";
+import { SwRegister } from "@/components/sw-register";
 import { FcmRegistration } from "@/components/fcm-registration";
 import "./globals.css";
 
@@ -44,6 +45,7 @@ export default function RootLayout({
     >
       <body className="font-sans">
         <Providers>
+          <SwRegister />
           <FcmRegistration />
           {children}
         </Providers>

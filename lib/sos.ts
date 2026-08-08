@@ -73,6 +73,23 @@ export function buildSosMessage(fullName: string | null | undefined, guestUrl: s
 }
 
 /**
+ * Offline SMS fallback body — no guest URL exists without a network, so the
+ * maps link carries the exact last-known coordinates:
+ *   EMERGENCY! I need help. My last known location: https://maps.google.com/?q=lat,lng
+ * Pass `null` when the position could not be resolved (the location clause is
+ * then omitted rather than sending a dead link).
+ */
+export function buildOfflineSosMessage(locationUrl: string | null): string {
+  const location = locationUrl ? ` My last known location: ${locationUrl}` : "";
+  return `EMERGENCY! I need help.${location}`;
+}
+
+/** Google Maps coordinates link used in the offline SMS body. */
+export function buildMapsLocationUrl(lat: number, lng: number): string {
+  return `https://maps.google.com/?q=${lat},${lng}`;
+}
+
+/**
  * Coarse mobile detect for the auto-open redirect. Guarded so a walk on a
  * desktop/tablet never hijacks the app into a dead sms: handler.
  */
