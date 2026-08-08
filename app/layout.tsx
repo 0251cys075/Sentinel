@@ -22,14 +22,14 @@ export const metadata: Metadata = {
   title: "Sentinel — Protection that never sleeps",
   description:
     "Sentinel watches over your journey in the background, so you can focus on getting where you're going.",
-  manifest: "/manifest.webmanifest",
+  manifest: "/manifest.json",
 };
 
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
   viewportFit: "cover",
-  themeColor: "#0F6E56",
+  themeColor: "#0d1412",
 };
 
 export default function RootLayout({

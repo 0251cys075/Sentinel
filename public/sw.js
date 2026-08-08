@@ -13,7 +13,7 @@
  *  - `activate` → purge stale caches so old builds never linger.
  */
 
-const VERSION = "v2";
+const VERSION = "v3";
 const CORE_CACHE = `sentinel-core-${VERSION}`;
 const RUNTIME_CACHE = `sentinel-runtime-${VERSION}`;
 
@@ -24,7 +24,7 @@ const RUNTIME_CACHE = `sentinel-runtime-${VERSION}`;
 const PRECACHE_URLS = [
   "/",
   "/offline.html",
-  "/manifest.webmanifest",
+  "/manifest.json",
   "/icon.svg",
   "/sounds/siren.wav",
 ];
@@ -93,7 +93,7 @@ self.addEventListener("fetch", (event) => {
   const isStaticAsset =
     url.pathname.startsWith("/_next/static/") ||
     url.pathname === "/icon.svg" ||
-    url.pathname === "/manifest.webmanifest" ||
+    url.pathname === "/manifest.json" ||
     url.pathname.startsWith("/sounds/");
 
   if (isStaticAsset) {
