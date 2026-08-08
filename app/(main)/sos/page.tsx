@@ -21,6 +21,7 @@ import { SpeedBadge } from "@/components/speed-badge";
 import { useLiveTelemetry } from "@/lib/use-live-telemetry";
 import { useOfflineRoute } from "@/lib/use-offline-route";
 import { useStreetName } from "@/lib/use-street-name";
+import { SOS_BURST_MS, stopSiren, triggerEmergencyAlarm } from "@/lib/siren";
 
 const SOS_COUNTDOWN_SECONDS = 8;
 
@@ -247,10 +248,12 @@ function SosScreen() {
     setSending(true);
     try {
       // ── Offline path: no network at all — skip Supabase entirely and go
-      //    straight to the native SMS composer. ──
+      //    straight to the native SMS composer. Identical hardware response
+      //    to the online path: same alarm, same stop contract. ──
       if (typeof navigator !== "undefined" && navigator.onLine === false) {
         const ok = await sendOfflineSms();
         if (ok) {
+          triggerEmergencyAlarm(SOS_BURST_MS);
           setOfflineSms(true);
           setConfirmed(true);
           return true;
@@ -326,6 +329,7 @@ function SosScreen() {
       }
 
       setShareInfo({ guestUrl: guestUrl ?? "", smsUris });
+      triggerEmergencyAlarm(SOS_BURST_MS);
       return true;
     } catch (err) {
       // API call failed (no network despite navigator.onLine, Supabase down,
@@ -333,6 +337,7 @@ function SosScreen() {
       // leaving the user with nothing.
       const offlineOk = await sendOfflineSms();
       if (offlineOk) {
+        triggerEmergencyAlarm(SOS_BURST_MS);
         setOfflineSms(true);
         setConfirmed(true);
         return true;
@@ -377,6 +382,7 @@ function SosScreen() {
   const cancel = () => {
     if (doneRef.current || sending) return;
     doneRef.current = true;
+    stopSiren(); // alarm must die with the SOS the user just cancelled
     toast("SOS cancelled — you're safe.");
     if (window.history.length > 1) window.history.back();
     else router.push("/");
