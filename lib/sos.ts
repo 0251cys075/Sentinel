@@ -89,6 +89,39 @@ export function buildMapsLocationUrl(lat: number, lng: number): string {
   return `https://maps.google.com/?q=${lat},${lng}`;
 }
 
+/** Last-resort emergency number when no trusted contacts are available. */
+export const EMERGENCY_FALLBACK_NUMBER = "112";
+
+/**
+ * The number the offline SOS falls back to. Honors the user's own
+ * `emergency_contact` preference (e.g. a specific police / family number
+ * stashed in localStorage), then defaults to 112 — the number always
+ * reachable, with or without stored contacts.
+ */
+export function emergencySmsNumber(): string {
+  if (typeof window === "undefined") return EMERGENCY_FALLBACK_NUMBER;
+  try {
+    const stored = window.localStorage.getItem("emergency_contact");
+    if (stored) {
+      const digits = stored.replace(/[^\d+]/g, "");
+      if (digits) return digits;
+    }
+  } catch {
+    /* storage blocked/disabled — fall through to the default */
+  }
+  return EMERGENCY_FALLBACK_NUMBER;
+}
+
+/**
+ * Body for the no-contacts offline SOS SMS (same wording as the requested
+ * handler). The maps link carries the coordinates; pass `null` when the
+ * position could not be resolved so no dead link is included.
+ */
+export function buildEmergencySmsMessage(locationUrl: string | null): string {
+  const location = locationUrl ? ` My location: ${locationUrl}` : "";
+  return `EMERGENCY! I need immediate help.${location}`;
+}
+
 /**
  * Coarse mobile detect for the auto-open redirect. Guarded so a walk on a
  * desktop/tablet never hijacks the app into a dead sms: handler.

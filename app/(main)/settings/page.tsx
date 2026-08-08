@@ -19,12 +19,14 @@ export default function SettingsPage() {
   const [tripCount, setTripCount] = useState(0);
   const [locOn, setLocOn] = useState(true);
   const [smsOn, setSmsOn] = useState(false);
+  const [shakeOn, setShakeOn] = useState(true);
   const [signingOut, setSigningOut] = useState(false);
 
   useEffect(() => {
     const supabase = getSupabaseBrowser();
     setLocOn(localStorage.getItem("sentinelLoc") !== "off");
     setSmsOn(localStorage.getItem("sentinelSmsFallback") === "on");
+    setShakeOn(localStorage.getItem("sentinelShakeSos") !== "off");
 
     supabase
       .from("trusted_contacts")
@@ -55,6 +57,17 @@ export default function SettingsPage() {
       next
         ? "SMS fallback armed (demo path — Twilio not wired)"
         : "SMS fallback off"
+    );
+  }, [toast]);
+
+  const toggleShake = useCallback(() => {
+    const next = !(localStorage.getItem("sentinelShakeSos") !== "off");
+    localStorage.setItem("sentinelShakeSos", next ? "on" : "off");
+    setShakeOn(next);
+    toast(
+      next
+        ? "Shake-to-SOS armed — siren, vibrate and SOS on shake"
+        : "Shake-to-SOS off"
     );
   }, [toast]);
 
@@ -114,6 +127,18 @@ export default function SettingsPage() {
             <small className="text-muted">Only during active journeys</small>
           </div>
           <Switch on={locOn} onClick={toggleLocation} />
+        </div>
+
+        <div className="flex items-center justify-between border-t border-line py-[15px]">
+          <div>
+            <b>Shake-to-SOS</b>
+            <br />
+            <small className="text-muted">
+              Shake your phone to sound the siren, vibrate and open SOS —
+              stays armed offline
+            </small>
+          </div>
+          <Switch on={shakeOn} onClick={toggleShake} />
         </div>
       </Card>
 

@@ -7,8 +7,10 @@ import {
     buildGuestTrackUrl,
     buildMapsLocationUrl,
     buildOfflineSosMessage,
+    buildEmergencySmsMessage,
     buildSosMessage,
     buildSosSmsDeepLink,
+    emergencySmsNumber,
     generateGuestToken,
     guestTokenExpiry,
     isMobileDevice,
@@ -17,6 +19,7 @@ import { useToast } from "@/components/toast";
 import { Card } from "@/components/primitives";
 import { SpeedBadge } from "@/components/speed-badge";
 import { useLiveTelemetry } from "@/lib/use-live-telemetry";
+import { useOfflineRoute } from "@/lib/use-offline-route";
 import { useStreetName } from "@/lib/use-street-name";
 
 const SOS_COUNTDOWN_SECONDS = 8;
@@ -59,6 +62,14 @@ function SosScreen() {
     travelMode: "Walk",
   });
   const sosStreet = useStreetName(tel.gps?.lat ?? null, tel.gps?.lng ?? null);
+
+  /** Feature 3: breadcrumbs keep recording during the emergency even in dead
+      zones — they sync to trip_locations the moment a signal returns. */
+  const offline = useOfflineRoute({
+    tripId: streamTripId,
+    enabled: !!streamTripId,
+    travelMode: "Walk",
+  });
 
   /** What got handed out after a successful SOS (guest link + SMS targets). */
   const [shareInfo, setShareInfo] = useState<{
@@ -185,17 +196,36 @@ function SosScreen() {
    * SMS composer is the only channel left. Grab the last known position,
    * pre-fill `sms:` links for every primary contact with a maps link, and
    * return true if any usable SMS target exists.
+   *
+   * Guaranteed action: when no trusted contacts are cached, the SOS still
+   * fires to the user's stored `emergency_contact` number (else 112) with
+   * the exact "EMERGENCY! I need immediate help." message — a real, usable
+   * SMS no matter what state the app is in.
    */
   const sendOfflineSms = useCallback(async (): Promise<boolean> => {
-    const contacts = primaryContactsRef.current;
-    if (!contacts.length) return false;
-
     const pos = await resolveLastKnownPosition();
     const locationUrl = pos ? buildMapsLocationUrl(pos.lat, pos.lng) : null;
-    const message = buildOfflineSosMessage(locationUrl);
-    const smsUris = contacts
-      .map((c) => ({ name: c.name, uri: buildSosSmsDeepLink(c.phone, message) }))
+
+    const contacts = primaryContactsRef.current;
+    let smsUris = contacts
+      .map((c) => ({
+        name: c.name,
+        uri: buildSosSmsDeepLink(c.phone, buildOfflineSosMessage(locationUrl)),
+      }))
       .filter((u) => u.uri);
+
+    if (!smsUris.length) {
+      const emergencyNumber = emergencySmsNumber();
+      const emergencyUri = buildSosSmsDeepLink(
+        emergencyNumber,
+        buildEmergencySmsMessage(locationUrl)
+      );
+      if (emergencyUri) {
+        smsUris = [
+          { name: `Emergency services (${emergencyNumber})`, uri: emergencyUri },
+        ];
+      }
+    }
     if (!smsUris.length) return false;
 
     setShareInfo({ guestUrl: "", smsUris });
@@ -391,7 +421,7 @@ function SosScreen() {
         </h1>
         <p className="mt-3 leading-[1.6] text-muted">
           {offlineSms
-            ? "You're offline — your SMS app has opened with your last known location. One tap and it goes out to your circle."
+            ? "You're offline — your SMS app has opened with your last known location. One tap and it goes out to your circle or emergency services."
             : smsTargets.length
               ? "Opening your SMS app for the first contact — one tap and the live tracking link goes out."
               : "Your trusted contacts have been notified with your location."}
@@ -449,6 +479,12 @@ function SosScreen() {
             >
               Open live journey map
             </button>
+          )}
+          {offline.queuedCount > 0 && (
+            <p className="mt-2 text-xs font-bold text-primary">
+              📡 {offline.queuedCount} breadcrumb{offline.queuedCount === 1 ? "" : "s"} saved
+              locally — auto-syncing when signal returns.
+            </p>
           )}
           </div>
         )}

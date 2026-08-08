@@ -68,13 +68,31 @@ function LiveScreen() {
     travelMode: trip?.transit_mode ?? "Walk",
   });
 
-  // ── Feature 3: offline breadcrumbs — GPS keeps recording to localStorage
-  //    in dead zones; the `online` event/next fix bulk-syncs to Supabase. ──
+  /* ── Feature 3: offline breadcrumbs — GPS keeps recording to localStorage
+     in dead zones; the `online` event/next fix bulk-syncs to Supabase. ── */
   const offline = useOfflineRoute({
     tripId: tripId || null,
     enabled: !!tripId && !tel.demoMode,
     travelMode: trip?.transit_mode ?? "Walk",
   });
+
+  /* Local breadcrumbs feed the map trail too: while the device is offline
+     the breadcrumb queue IS the trip (server trail is empty), so merge the
+     queued points in, deduped by recorded_at and ordered chronologically.
+     Once synced they arrive via Realtime and the merge stays idempotent. */
+  const mapTrail = useMemo(() => {
+    const seen = new Set(trail.map((t) => t.recorded_at));
+    const merged = [
+      ...trail.map((t) => ({ lat: t.lat, lng: t.lng, recorded_at: t.recorded_at })),
+      ...offline.points
+        .filter((p) => !seen.has(p.recorded_at))
+        .map((p) => ({ lat: p.lat, lng: p.lng, recorded_at: p.recorded_at })),
+    ];
+    // Chronological so the polyline draws the walked path, not a zigzag.
+    return merged
+      .sort((a, b) => (a.recorded_at < b.recorded_at ? -1 : 1))
+      .map(({ lat, lng }) => ({ lat, lng }));
+  }, [trail, offline.points]);
 
   /* Feature 3: announce a successful offline-route sync (queue drained). */
   useEffect(() => {
@@ -381,7 +399,7 @@ function LiveScreen() {
       {/* ── Interactive map + live navigation bar (Feature 2) ───────── */}
       <div className="map">
         <LiveNavMap
-          trail={trail.map((t) => ({ lat: t.lat, lng: t.lng }))}
+          trail={mapTrail}
           user={tel.gps}
           destination={destination}
         />

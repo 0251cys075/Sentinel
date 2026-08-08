@@ -5,10 +5,10 @@
  *
  * While a journey is active the native GPS watcher records a raw
  * `{ lat, lng, recorded_at }` breadcrumb on a ~15 s cadence straight into
- * localStorage (`offline_route`) — no network required. When connectivity
- * comes back (`online` event, a new GPS fix, or a light retry poll) the
- * queue is bulk-inserted into `trip_locations` (same table the Realtime
- * guest tracking reads) and cleared.
+ * localStorage (`sentinel_route_logs`) — no network required. When
+ * connectivity comes back (`online` event, a new GPS fix, or a light retry
+ * poll) the queue is bulk-inserted into `trip_locations` (same table the
+ * Realtime guest tracking reads) and cleared.
  *
  * Storage choice: plain localStorage — points are ~60 bytes and the queue
  * is hard-capped at 5 000 entries (~300 KB), far under the 5 MB quota, so
@@ -25,7 +25,9 @@ export interface OfflineRoutePoint {
 }
 
 /** localStorage key that survives page reloads and dead zones. */
-const STORAGE_KEY = "offline_route";
+const STORAGE_KEY = "sentinel_route_logs";
+/** Pre-spec key — migrated once on first mount so no breadcrumbs are lost. */
+const LEGACY_STORAGE_KEY = "offline_route";
 /** Cadence: capture at most one breadcrumb per 15 s. */
 const RECORD_INTERVAL_MS = 15_000;
 /** Hard cap — oldest points drop first so storage can never grow unbounded. */
@@ -72,7 +74,16 @@ export function useOfflineRoute({
   /** Rehydrate whatever survived the last dead zone at mount. */
   useEffect(() => {
     try {
-      const raw = window.localStorage.getItem(STORAGE_KEY);
+      let raw = window.localStorage.getItem(STORAGE_KEY);
+      if (!raw) {
+        // One-time migration from the pre-spec key.
+        const legacy = window.localStorage.getItem(LEGACY_STORAGE_KEY);
+        if (legacy) {
+          raw = legacy;
+          window.localStorage.setItem(STORAGE_KEY, legacy);
+          window.localStorage.removeItem(LEGACY_STORAGE_KEY);
+        }
+      }
       if (!raw) return;
       const parsed = JSON.parse(raw) as OfflineRoutePoint[];
       if (Array.isArray(parsed)) {
@@ -174,5 +185,5 @@ export function useOfflineRoute({
     };
   }, [flushQueue]);
 
-  return { queuedCount, flushQueue };
+  return { queuedCount, points: queueRef.current, flushQueue };
 }

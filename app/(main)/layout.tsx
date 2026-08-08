@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { BottomNav } from "@/components/shell";
+import { ShakeDetector } from "@/components/shake-detector";
 
 /**
  * Auth guard for every protected screen. Middleware already bounces
@@ -25,6 +26,7 @@ export default async function MainLayout({
     <div className="app-shell">
       <div className="screen">{children}</div>
       <BottomNav />
+      <ShakeDetector />
     </div>
   );
 }
