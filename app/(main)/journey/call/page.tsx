@@ -320,8 +320,8 @@ export default function FakeCallPage() {
         </div>
       </div>
 
-      {/* ── Webcam evidence stream (self-attaching PiP, top-right) ── */}
-      <div className="relative my-2 ml-auto h-32 w-44 overflow-hidden rounded-xl border-2 border-red-500 bg-black shadow-2xl">
+      {/* ── Webcam evidence stream: locked 4:3 box, feed fills via object-cover ── */}
+      <div className="relative mx-auto aspect-[4/3] w-full max-w-md overflow-hidden rounded-2xl border border-red-500/30 bg-black/80 shadow-lg">
         {camState === "live" ? (
           <video
             ref={(node) => {
@@ -333,7 +333,7 @@ export default function FakeCallPage() {
             autoPlay
             playsInline
             muted
-            className="h-full w-full -scale-x-100 object-cover"
+            className="h-full w-full rounded-2xl object-cover -scale-x-100"
           />
         ) : camState === "denied" ? (
           <div className="flex h-full w-full flex-col items-center justify-center gap-1 bg-black px-2 text-center text-[8.5px] leading-tight text-red-400">
@@ -347,11 +347,15 @@ export default function FakeCallPage() {
             📷 Starting camera…
           </div>
         )}
-        <div className="absolute top-1 right-1 animate-pulse rounded bg-red-600 px-1.5 py-0.5 font-mono text-[8px] font-bold text-white">
-          🔴 EVIDENCE LOGGING
-        </div>
-        <div className="absolute bottom-1 left-1 rounded bg-black/80 px-1 font-mono text-[8px] text-emerald-400">
-          FACIAL CAPTURE ACTIVE • GEOLOCATION LOGGED
+
+        {/* Overlay badges — stacked top-right, never overlapping the feed */}
+        <div className="pointer-events-none absolute top-3 right-3 z-10 flex flex-col items-end gap-1">
+          <span className="rounded-md border border-red-500/40 bg-black/70 px-2 py-1 font-mono text-[10px] tracking-wider text-red-400 uppercase backdrop-blur-md">
+            FACIAL CAPTURE ACTIVE
+          </span>
+          <span className="rounded-md border border-emerald-500/40 bg-black/70 px-2 py-1 font-mono text-[10px] tracking-wider text-emerald-400 uppercase backdrop-blur-md">
+            GEOLOCATION LOGGED
+          </span>
         </div>
       </div>
 
