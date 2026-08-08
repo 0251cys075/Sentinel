@@ -58,70 +58,141 @@ const SCRIPT: ScriptStage[] = [
   },
 ];
 
-/** Speak a line through the Web Speech API (natural Hindi/Indian English). */
-function speakLine(text: string, lang = "hi-IN") {
-  if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
-  const utter = new SpeechSynthesisUtterance(text);
-  utter.lang = lang;
-  const voices = window.speechSynthesis.getVoices();
-  // Dynamic voice filter: prefer a human-sounding Hindi/Indian voice.
-  const humanVoice = voices.find(
-    (v) =>
-      v.lang?.includes("hi") ||
-      v.name.includes("Google") ||
-      v.name.includes("India") ||
-      v.name.includes("Natural")
+/**
+ * Voice gender is NOT exposed by the platform APIs (Google / Microsoft /
+ * macOS all omit it), so the officer picker uses name + language heuristics
+ * with an explicit FEMALE blocklist. The blocklist is what makes the voice
+ * consistent laptop→mobile: without it a laptop picks "Google UK English
+ * Female" while the phone picks "Microsoft Hemant".
+ */
+const OFFICER_MALE_HINTS = [
+  "male",
+  "hemant",
+  "ravi",
+  "madhur",
+  "prabhat",
+  "arun",
+  "david",
+  "daniel",
+  "george",
+  "gordon",
+  "alex",
+  "fred",
+  "google us english",
+  "google hindi",
+  "google हिन्दी",
+];
+const OFFICER_FEMALE_MARKS = [
+  "female",
+  "zira",
+  "hazel",
+  "susan",
+  "karen",
+  "moira",
+  "tessa",
+  "aria",
+  "jenny",
+  "libby",
+  "sonia",
+  "kiran",
+  "dhwani",
+  "neerja",
+  "swara",
+  "lekha",
+  "kendra",
+  "victoria",
+];
+
+/** Male-officer match: never a known female profile, never a neutral pick. */
+function isMaleOfficerVoice(v: SpeechSynthesisVoice): boolean {
+  const name = v.name.toLowerCase();
+  if (OFFICER_FEMALE_MARKS.some((mark) => name.includes(mark))) return false;
+  return OFFICER_MALE_HINTS.some((hint) => name.includes(hint));
+}
+
+/** Highest-priority male voice: Indian male → any Indian → any male. */
+function pickOfficerVoice(voices: SpeechSynthesisVoice[]): SpeechSynthesisVoice | null {
+  if (!voices.length) return null;
+  const isIndian = (v: SpeechSynthesisVoice) => {
+    const lang = v.lang.toLowerCase();
+    const name = v.name.toLowerCase();
+    return (
+      lang.startsWith("hi") ||
+      lang.includes("en-in") ||
+      name.includes("india") ||
+      name.includes("hindi")
+    );
+  };
+  return (
+    voices.find((v) => isIndian(v) && isMaleOfficerVoice(v)) ??
+    voices.find(isIndian) ??
+    voices.find(isMaleOfficerVoice) ??
+    null
   );
-  if (humanVoice) utter.voice = humanVoice;
-  utter.rate = 0.92; // natural speaking pace
-  utter.pitch = 0.95; // authoritative police tone
-  window.speechSynthesis.speak(utter);
 }
 
 /**
- * Deep authoritative Indian MALE police voice — the broadcast opener. Explicitly
- * avoids the browser's default TTS: targets Indian male voice profiles
- * (Google Hindi, Microsoft Hemant / Ravi, or hi-IN / en-IN) with a firm,
- * low-pitched delivery.
+ * Speak through the guaranteed male-officer voice. Every line of the
+ * broadcast (opener AND staged script) routes through here so laptop and
+ * mobile always read with the same voice. The low pitch survives even the
+ * default-voice fallback, so it can never sound like "Google Zira" either.
  */
-function speakPoliceOfficerVoice() {
+function speakWithOfficerVoice(
+  text: string,
+  lang = "hi-IN",
+  rate = 0.9,
+  pitch = 0.8
+) {
   if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
-  window.speechSynthesis.cancel();
+  const utterance = new SpeechSynthesisUtterance(text);
+  utterance.lang = lang;
+  utterance.rate = rate;
+  utterance.pitch = pitch; // deep, authoritative — male even on default voices
 
-  const utterance = new SpeechSynthesisUtterance(
-    "Suno! UP Police Control Room 112. Ma'am, aapki live GPS location lock ho gayi hai. Knowledge Park III ke pass PCR Van 104 bas 30 seconds door hai. Phone ka camera suspect ki taraf ghoomayein!"
-  );
-  utterance.lang = "hi-IN";
-
-  const loadVoicesAndSpeak = () => {
-    const voices = window.speechSynthesis.getVoices();
-    // Search for Indian Male voice profiles (Google Hindi, Microsoft Hemant, or hi-IN)
-    const maleIndianVoice =
-      voices.find(
-        (v) =>
-          (v.lang.includes("hi") || v.lang.includes("en-IN")) &&
-          (v.name.includes("Male") ||
-            v.name.includes("Hemant") ||
-            v.name.includes("Google") ||
-            v.name.includes("Ravi"))
-      ) || voices.find((v) => v.lang.includes("hi-IN"));
-
-    if (maleIndianVoice) utterance.voice = maleIndianVoice;
-
-    utterance.rate = 0.88; // Firm, deliberate police tone
-    utterance.pitch = 0.82; // Lower, deeper male pitch
-
+  const apply = () => {
+    const voice = pickOfficerVoice(window.speechSynthesis.getVoices());
+    if (voice) utterance.voice = voice;
     window.speechSynthesis.speak(utterance);
   };
 
   if (window.speechSynthesis.getVoices().length > 0) {
-    loadVoicesAndSpeak();
+    apply();
   } else {
-    window.speechSynthesis.onvoiceschanged = () => {
-      loadVoicesAndSpeak();
-      window.speechSynthesis.onvoiceschanged = null; // speak once
+    // Voice list loads async on some engines — wait for it, with a hard
+    // timeout so a never-firing voiceschanged can't silently drop the line.
+    const onVoices = () => {
+      window.speechSynthesis.onvoiceschanged = null;
+      apply();
     };
+    window.speechSynthesis.onvoiceschanged = onVoices;
+    window.setTimeout(() => {
+      if (window.speechSynthesis.onvoiceschanged === onVoices) {
+        window.speechSynthesis.onvoiceschanged = null;
+        apply();
+      }
+    }, 250);
   }
+}
+
+/** Follow-up control-room line — natural pace, still the officer's voice. */
+function speakLine(text: string, lang = "hi-IN") {
+  speakWithOfficerVoice(text, lang, 0.92, 0.85);
+}
+
+/**
+ * Deep authoritative Indian MALE police voice — the broadcast opener. Cancels
+ * any prior speech and speaks on the same picker every device uses, so mobile
+ * and laptop deliver the identical voice.
+ */
+function speakPoliceOfficerVoice() {
+  if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
+  window.speechSynthesis.cancel();
+  speakWithOfficerVoice(
+    "Suno! UP Police Control Room 112. Ma'am, aapki live GPS location lock ho gayi hai. Knowledge Park III ke pass PCR Van 104 bas 30 seconds door hai. Phone ka camera suspect ki taraf ghoomayein!",
+    "hi-IN",
+    0.88,
+    0.8
+  );
 }
 
 function fmtLat(lat: number): string {
@@ -320,8 +391,9 @@ export default function FakeCallPage() {
         </div>
       </div>
 
-      {/* ── Webcam evidence stream: locked 4:3 box, feed fills via object-cover ── */}
-      <div className="relative mx-auto aspect-[4/3] w-full max-w-md overflow-hidden rounded-2xl border border-red-500/30 bg-black/80 shadow-lg">
+      {/* ── Webcam evidence stream: locked 16:9 (4:3 on desktop) box, feed
+             fills via object-cover — identical structure on mobile & laptop ── */}
+      <div className="relative mx-auto my-8 aspect-[16/9] w-full max-w-2xl overflow-hidden rounded-3xl border border-red-500/30 bg-black/80 shadow-[0_0_60px_-10px_rgba(239,68,68,0.3)] md:aspect-[4/3]">
         {camState === "live" ? (
           <video
             ref={(node) => {
@@ -333,7 +405,7 @@ export default function FakeCallPage() {
             autoPlay
             playsInline
             muted
-            className="h-full w-full rounded-2xl object-cover -scale-x-100"
+            className="h-full w-full rounded-3xl object-cover -scale-x-100"
           />
         ) : camState === "denied" ? (
           <div className="flex h-full w-full flex-col items-center justify-center gap-1 bg-black px-2 text-center text-[8.5px] leading-tight text-red-400">
@@ -348,12 +420,12 @@ export default function FakeCallPage() {
           </div>
         )}
 
-        {/* Overlay badges — stacked top-right, never overlapping the feed */}
-        <div className="pointer-events-none absolute top-3 right-3 z-10 flex flex-col items-end gap-1">
-          <span className="rounded-md border border-red-500/40 bg-black/70 px-2 py-1 font-mono text-[10px] tracking-wider text-red-400 uppercase backdrop-blur-md">
+        {/* Status overlays in top right of video container */}
+        <div className="pointer-events-none absolute top-4 right-4 z-10 flex flex-col items-end gap-1.5">
+          <span className="rounded-lg border border-red-500/40 bg-black/70 px-2.5 py-1.5 font-mono text-[11px] tracking-wider text-red-400 uppercase backdrop-blur-sm">
             FACIAL CAPTURE ACTIVE
           </span>
-          <span className="rounded-md border border-emerald-500/40 bg-black/70 px-2 py-1 font-mono text-[10px] tracking-wider text-emerald-400 uppercase backdrop-blur-md">
+          <span className="rounded-lg border border-emerald-500/40 bg-black/70 px-2.5 py-1.5 font-mono text-[11px] tracking-wider text-emerald-400 uppercase backdrop-blur-sm">
             GEOLOCATION LOGGED
           </span>
         </div>
