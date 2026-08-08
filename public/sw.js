@@ -13,15 +13,17 @@
  *  - `activate` → purge stale caches so old builds never linger.
  */
 
-const VERSION = "v1";
+const VERSION = "v2";
 const CORE_CACHE = `sentinel-core-${VERSION}`;
 const RUNTIME_CACHE = `sentinel-runtime-${VERSION}`;
 
 /** Essential offline-first assets — index shell, icons, CSS bundles,
- *  manifest and siren/alarm sounds. /_next/static/ is filled on the fly
- *  by the runtime cache (hashed filenames → safe to cache-first). */
+ *  manifest, siren/alarm sounds and the branded offline fallback page.
+ *  /_next/static/ is filled on the fly by the runtime cache (hashed
+ *  filenames → safe to cache-first). */
 const PRECACHE_URLS = [
   "/",
+  "/offline.html",
   "/manifest.webmanifest",
   "/icon.svg",
   "/sounds/siren.wav",
@@ -64,19 +66,25 @@ self.addEventListener("fetch", (event) => {
   if (url.origin !== self.location.origin) return;
 
   /* ── Page navigations: network-first, cached shell as the offline
-     fallback so the installed app opens without connectivity. ── */
+     fallback so the installed app opens without connectivity. Any failed
+     or non-ok response (DNS failure, 5xx, deploy window…) degrades to the
+     cached app shell, then to the branded offline page. ── */
   if (request.mode === "navigate") {
     event.respondWith(
       fetch(request)
         .then((response) => {
+          if (!response.ok) throw new Error(`Navigation failed: ${response.status}`);
           // Keep the freshest shell in the core cache for next offline open.
           const copy = response.clone();
           void caches.open(CORE_CACHE).then((cache) => cache.put("/", copy));
           return response;
         })
-        .catch(() =>
-          caches.match("/").then((shell) => shell || caches.match(request))
-        )
+        .catch(async () => {
+          const shell = await caches.match("/");
+          if (shell) return shell;
+          const offline = await caches.match("/offline.html");
+          return offline || Response.error();
+        })
     );
     return;
   }
@@ -105,10 +113,15 @@ self.addEventListener("fetch", (event) => {
   }
 
   /* ── Same-origin fallback: try the network, else any cached copy of the
-     exact URL, else the app shell. ── */
+     exact URL, else the app shell / branded offline page. ── */
   event.respondWith(
-    fetch(request).catch(() =>
-      caches.match(request).then((cached) => cached || caches.match("/"))
-    )
+    fetch(request).catch(async () => {
+      const cached = await caches.match(request);
+      if (cached) return cached;
+      const shell = await caches.match("/");
+      if (shell) return shell;
+      const offline = await caches.match("/offline.html");
+      return offline || Response.error();
+    })
   );
 });

@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
+<title>Sentinel — Offline</title>
+<style>
+  :root{
+    --bg:#FAF9F6;--card:#fff;--text:#2C2C2A;--muted:#73736d;
+    --primary:#0F6E56;--primary2:#e7f3ef;--danger:#d94a32;
+  }
+  [data-theme=dark]{
+    --bg:#0F1512;--card:#1A211D;--text:#F1EFE8;--muted:#a6ada7;
+    --primary:#2BC99A;--primary2:#153a2f;--danger:#ff7257;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{margin:0;background:var(--bg);color:var(--text);
+    font-family:Inter,"Segoe UI",system-ui,sans-serif;
+    -webkit-tap-highlight-color:transparent}
+  .app{min-height:100vh;max-width:480px;margin:auto;position:relative;
+    display:flex;flex-direction:column;align-items:center;justify-content:center;
+    text-align:center;padding:24px 20px}
+  .ring{width:96px;height:96px;border-radius:50%;margin:0 auto 22px;
+    background:rgba(15,110,86,.10);display:grid;place-items:center;
+    border:1px solid rgba(15,110,86,.30);animation:pulse 2.2s infinite}
+  [data-theme=dark] .ring{border-color:rgba(43,201,154,.35)}
+  .ring div{width:64px;height:64px;border-radius:50%;background:var(--primary);
+    display:grid;place-items:center;font-family:Poppins,Inter,sans-serif;
+    font-weight:800;font-size:18px;color:#fff;box-shadow:0 0 28px rgba(15,110,86,.35)}
+  @keyframes pulse{50%{box-shadow:0 0 0 12px rgba(15,110,86,.05)}}
+  .eyebrow{font-size:12px;text-transform:uppercase;letter-spacing:.14em;
+    color:var(--primary);font-weight:800}
+  h1{font-family:Poppins,Inter,sans-serif;margin:8px 0 10px;font-size:26px}
+  p{line-height:1.65;color:var(--muted);margin:0 0 26px;font-size:15px}
+  button{width:100%;padding:15px 18px;border-radius:15px;border:0;cursor:pointer;
+    background:var(--primary);color:#fff;font-weight:800;font-size:15px;
+    box-shadow:0 10px 24px rgba(15,110,86,.18)}
+  .note{margin-top:16px;font-size:12px;color:var(--muted)}
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="ring"><div>◈</div></div>
+  <div class="eyebrow">Protection that never sleeps</div>
+  <h1>You&apos;re offline</h1>
+  <p>Sentinel is cached on your device — SOS, SMS links and offline
+     breadcrumb tracking still work. The rest auto-syncs the moment
+     you&apos;re back online.</p>
+  <button id="retry" type="button">Retry connection</button>
+  <div class="note" id="status">Waiting for your connection to return…</div>
+</div>
+<script>
+  document.getElementById("retry").addEventListener("click", () => {
+    location.reload();
+  });
+  window.addEventListener("online", () => {
+    document.getElementById("status").textContent = "Connection back — reloading Sentinel…";
+    location.reload();
+  });
+</script>
+</body>
+</html>
